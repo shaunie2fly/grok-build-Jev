@@ -1328,6 +1328,16 @@ pub(super) fn handle_session_notification_with_origin(
                 true
             }
         }
+        XaiSessionUpdate::DynamicReasoningEffort { effort } => {
+            if meta.is_replay {
+                false
+            } else {
+                agent
+                    .session
+                    .tracker
+                    .set_dynamic_reasoning_effort(Some(effort), &mut agent.scrollback)
+            }
+        }
         XaiSessionUpdate::SessionStatus(status) => {
             agent.status_context = Some(*status);
             status_snapshot_applied = true;

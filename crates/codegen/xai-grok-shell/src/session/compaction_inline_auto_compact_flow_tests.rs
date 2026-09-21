@@ -102,6 +102,7 @@ async fn create_test_actor(
         delivery_tools: std::cell::RefCell::new(Vec::new()),
         attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
         chat_state_handle,
+        judgment_hook: std::sync::OnceLock::new(),
         current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
         active_work: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         pending_interactions: std::sync::Arc::new(std::sync::Mutex::new(

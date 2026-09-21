@@ -50,6 +50,11 @@ pub struct Config {
     pub telemetry: TelemetryPersistConfig,
     /// `[features]`: only the key the pager persists round-trips.
     pub features: FeaturesPersistConfig,
+    /// `[judgment]` section: TypeSafe Jev settings the Settings modal toggles.
+    /// Round-tripped through `merge_section` so a modal toggle writes only the fields it changed
+    /// and leaves the rest of the table (`api_key`, `endpoint`, `timeout_ms`, the other levers)
+    /// exactly as the user wrote them.
+    pub judgment: Option<xai_grok_config::JudgmentConfig>,
 }
 
 /// The `[telemetry]` slice the pager is allowed to write back.

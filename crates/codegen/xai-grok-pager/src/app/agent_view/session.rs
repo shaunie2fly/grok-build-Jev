@@ -125,6 +125,20 @@ impl AgentView {
         agent.post_turn_plan_review = app.post_turn_plan_review;
         agent
     }
+    /// The effort Jev classified for the current turn, if the shell reported one.
+    ///
+    /// Single source of truth lives on the tracker (it is what stamps each thinking block and what `finish_turn`
+    /// clears), so the model label and the block header can never disagree about which effort ran.
+    pub fn dynamic_reasoning_effort(&self) -> Option<&str> {
+        self.session.tracker.dynamic_reasoning_effort.as_deref()
+    }
+    /// Effort Jev classified for the most recent completed turn, if any.
+    pub fn last_dynamic_reasoning_effort(&self) -> Option<&str> {
+        self.session
+            .tracker
+            .last_dynamic_reasoning_effort
+            .as_deref()
+    }
     /// Create a new agent view with default UI state.
     ///
     /// The prompt widget is initialized with the session's working directory.

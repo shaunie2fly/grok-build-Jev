@@ -1075,8 +1075,17 @@ impl SessionActor {
                                 Some(duration_ms),
                             )
                             .await;
-                        let model_output_override = delivery.model_output.take();
+                        let mut model_output_override = delivery.model_output.take();
                         post_tool_use_delivery = Some(delivery);
+                        // Subsystem 4: a long, error-free shell output is replaced by its head and
+                        // tail. A hook-supplied override is authoritative, so it is never distilled.
+                        if model_output_override.is_none() {
+                            model_output_override =
+                                self.distill_tool_output(drained.output()).await;
+                        }
+                        // Subsystem 5: a reverted hypothesis can make the preceding turns dead
+                        // weight. Checked here because this is where the command is still known.
+                        self.maybe_prune_dead_end_tail(drained.output()).await;
                         (model_output_override, deferred_hook_scrollback)
                     };
                     let bridge_result = self
@@ -1664,7 +1673,43 @@ impl SessionActor {
                 wait_ms = 0_i64,
             );
         }
-        if !plan_file_auto_approve {
+        // Subsystem 6: let Jev auto-approve a tool call it scores as non-destructive.
+        // Gated on `[judgment] enabled + gate_tools`. A pre-tool-use hook that already asked the
+        // user keeps its say, and anything Jev calls risky (or any Jev failure) falls through to
+        // the interactive prompt below, so this can only ever remove a prompt it is sure about.
+        let judgment_verdict = if plan_file_auto_approve || hook_ask.is_some() {
+            None
+        } else {
+            match self.judgment_hook().filter(|h| h.gate_tools_enabled()) {
+                // Jev judges the tool's actual arguments, rendered as text.
+                Some(hook) => Some(
+                    hook.evaluator()
+                        .is_safe_tool(&resolved_tool_name, &raw_input.to_string())
+                        .await,
+                ),
+                None => None,
+            }
+        };
+        let gate = crate::judgment::tool_gate_outcome(
+            plan_file_auto_approve,
+            hook_ask.is_some(),
+            judgment_verdict,
+        );
+        let judgment_auto_approve = gate == crate::judgment::ToolGateOutcome::JudgmentAllow;
+        if judgment_auto_approve {
+            xai_grok_telemetry::event_span!(
+                "tool.decision",
+                tool_name = %call.function.name,
+                tool_use_id = %call.id,
+                model_id = %model_id_str,
+                decision = "allow",
+                source = "judgment",
+                wait_ms = 0_i64,
+            );
+        }
+        // Either auto-approval source skips the interactive permission round-trip below.
+        let approval_skip = gate != crate::judgment::ToolGateOutcome::AskUser;
+        if !approval_skip {
             let (perm_title, perm_kind, perm_raw_input) = tool_call_display
                 .as_ref()
                 .map(|(t, k, r)| (Some(t.clone()), Some(*k), Some(r.clone())))

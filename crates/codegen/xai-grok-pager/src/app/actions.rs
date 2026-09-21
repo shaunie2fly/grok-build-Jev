@@ -458,6 +458,18 @@ pub enum Action {
     SetRememberToolApprovals(bool),
     /// Toggle the ask_user_question timeout. SHELL-owned; persisted to `[toolset.ask_user_question].timeout_enabled`. Applies to new sessions.
     SetAskUserQuestionTimeoutEnabled(bool),
+    /// Master switch for TypeSafe Jev judgment. SHELL-owned; persisted to `[judgment].enabled`.
+    /// Applies to new sessions.
+    SetJudgmentEnabled(bool),
+    /// Jev pre-execution safety gating. SHELL-owned; persisted to `[judgment].gate_tools`.
+    /// Applies to new sessions.
+    SetJudgmentSafetyGateEnabled(bool),
+    /// Jev dynamic reasoning-effort modulation. SHELL-owned; persisted to `[judgment].dynamic_thinking`.
+    /// Applies to new sessions.
+    SetJudgmentDynamicReasoningEnabled(bool),
+    /// Jev output distillation. SHELL-owned; persisted to `[judgment].distill_outputs`.
+    /// Applies to new sessions.
+    SetJudgmentDistillationEnabled(bool),
     /// SHELL-owned `keep_text_selection` (`flash` | `hold`); cache and persist.
     SetKeepTextSelection(crate::appearance::TextSelection),
     /// Set the mouse-wheel scroll speed multiplier (1-100).

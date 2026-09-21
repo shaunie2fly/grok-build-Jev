@@ -237,6 +237,50 @@ fn parses_toolset_overrides() {
     assert_eq!(cfg.toolset.ask_user_question.timeout_enabled, Some(false));
     assert_eq!(cfg.toolset.ask_user_question.timeout_secs, Some(30));
 }
+/// The `[judgment]` section parses into `Config::judgment`, and an absent section leaves it `None`.
+/// `None` is the zero-regression default every Jev call site gates on, so this pins both directions.
+#[test]
+fn parses_judgment_table_and_defaults_to_none_when_absent() {
+    let raw_config: toml::Value = toml::from_str(
+        r#"
+            [judgment]
+            enabled = true
+            api_key = "env:TYPESAFE_API_KEY"
+            dynamic_thinking = true
+            dynamic_subagent_thinking = true
+            tournament_pruning = true
+            distill_outputs = true
+            prune_dead_ends = true
+            gate_tools = true
+            "#,
+    )
+    .unwrap();
+    let cfg = Config::new_from_toml_cfg(&raw_config).expect("config should parse");
+    let judgment = cfg
+        .judgment
+        .expect("`[judgment]` must populate Config::judgment");
+    assert!(judgment.enabled);
+    assert_eq!(judgment.api_key.as_deref(), Some("env:TYPESAFE_API_KEY"));
+    assert!(judgment.dynamic_thinking);
+    assert!(judgment.gate_tools);
+    // Unset keys still resolve to the documented defaults, not empty/zero values.
+    assert_eq!(judgment.endpoint, "https://api.typesafe.ai/v1/systemone");
+    assert_eq!(judgment.timeout_ms, 400);
+    assert_eq!(judgment.distill_line_threshold, 40);
+    assert_eq!(judgment.safety_threshold, 0.20);
+    assert!(
+        cfg.config_warnings.is_empty(),
+        "every judgment key is a declared field: {:?}",
+        cfg.config_warnings
+    );
+
+    let empty: toml::Value = toml::from_str("").unwrap();
+    let cfg = Config::new_from_toml_cfg(&empty).expect("config should parse");
+    assert_eq!(
+        cfg.judgment, None,
+        "an omitted section must leave judgment disabled"
+    );
+}
 #[test]
 fn parses_cursor_worker_table_without_unrecognized_keys() {
     let raw_config: toml::Value = toml::from_str(

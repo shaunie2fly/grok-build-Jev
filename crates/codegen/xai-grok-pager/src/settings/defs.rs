@@ -1222,6 +1222,114 @@ pub fn default_settings() -> Vec<SettingMeta> {
             restart_required: true,
             hidden_in_minimal: false,
         },
+        // SHELL-owned `[judgment]` master switch. Default OFF: with the section absent or
+        // `enabled = false`, every Jev subsystem keeps vanilla behavior.
+        // `restart_required` because a session resolves its judgment hook once, at first use.
+        SettingMeta {
+            key: "judgment.enabled",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "TypeSafe Jev judgment",
+            description: "Delegate micro-decisions to TypeSafe Jev, a fast non-generative \
+                          judgment model: it picks reasoning effort, distills noisy tool \
+                          output, and prunes reverted dead ends to cut token use. Requires a \
+                          TYPESAFE_API_KEY (or JEV_TYPESAFE_AI_KEY). Off by default; every \
+                          call fails open to normal behavior. Restart required.",
+            keywords: &[
+                "judgment",
+                "jev",
+                "typesafe",
+                "token",
+                "tokens",
+                "optimization",
+                "reasoning",
+                "effort",
+                "distill",
+                "judge",
+                "fast",
+                "latency",
+            ],
+            kind: SettingKind::Bool { default: false },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
+        // SHELL-owned `[judgment].gate_tools`. Lets Jev auto-approve a tool call it scores as
+        // non-destructive, skipping the interactive prompt. Anything else, and any Jev failure,
+        // still prompts — this can only remove a prompt Jev is sure about.
+        SettingMeta {
+            key: "judgment.safety_gate_enabled",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Judgment safety gating",
+            description: "Let Jev skip the approval prompt for tool calls it judges \
+                          non-destructive. Destructive or unjudgeable calls still prompt, so a \
+                          judgment outage never widens what runs unapproved. Requires the \
+                          judgment master switch. Restart required.",
+            keywords: &[
+                "judgment",
+                "jev",
+                "safety",
+                "gate",
+                "gating",
+                "approve",
+                "approval",
+                "prompt",
+                "permission",
+                "destructive",
+                "auto",
+            ],
+            kind: SettingKind::Bool { default: true },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
+        // SHELL-owned `[judgment].dynamic_thinking`. Per-turn reasoning effort from the prompt.
+        SettingMeta {
+            key: "judgment.dynamic_reasoning_enabled",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Judgment dynamic reasoning",
+            description: "Let Jev choose each turn's reasoning effort from the prompt, instead \
+                          of a fixed level. Falls back to the configured effort when Jev is \
+                          unavailable. Requires the judgment master switch. Restart required.",
+            keywords: &[
+                "judgment",
+                "jev",
+                "reasoning",
+                "effort",
+                "thinking",
+                "dynamic",
+                "adaptive",
+                "tokens",
+            ],
+            kind: SettingKind::Bool { default: true },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
+        // SHELL-owned `[judgment].distill_outputs`. Head/tail excerpt for large clean output.
+        SettingMeta {
+            key: "judgment.distillation_enabled",
+            category: SettingCategory::Agent,
+            owner: SettingOwner::Shell,
+            label: "Judgment output distillation",
+            description: "Replace long, error-free tool output with its first and last few \
+                          lines plus an omission count, keeping the middle out of context. \
+                          Output with actionable errors is always kept in full. Requires the \
+                          judgment master switch. Restart required.",
+            keywords: &[
+                "judgment",
+                "jev",
+                "distill",
+                "distillation",
+                "output",
+                "truncate",
+                "compress",
+                "tokens",
+                "context",
+            ],
+            kind: SettingKind::Bool { default: true },
+            restart_required: true,
+            hidden_in_minimal: false,
+        },
         // PAGER-owned, set over ACP. Reads from `PagerLocalSnapshot.plan_mode_active`.
         // The default "off" matches `AgentView::new`'s `plan_mode_active = false`
         SettingMeta {

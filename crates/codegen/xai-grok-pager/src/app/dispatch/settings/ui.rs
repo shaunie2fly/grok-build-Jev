@@ -7,7 +7,9 @@ use super::setters::{
     set_confirm_before_rewind_inner, set_contextual_hint_inner, set_default_model_inner,
     set_default_selected_permission_inner, set_display_refresh_auto_cadence_inner,
     set_follow_up_behavior_inner, set_fork_secondary_model_inner, set_group_tool_verbs_inner,
-    set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_keep_text_selection_inner,
+    set_hunk_tracker_mode_inner, set_invert_scroll_inner, set_judgment_distillation_enabled_inner,
+    set_judgment_dynamic_reasoning_enabled_inner, set_judgment_enabled_inner,
+    set_judgment_safety_gate_enabled_inner, set_keep_text_selection_inner,
     set_max_thoughts_width_inner, set_multiline_mode, set_page_flip_on_send_inner,
     set_prompt_suggestions_inner, set_remember_tool_approvals_inner, set_render_mermaid_inner,
     set_respect_manual_folds_inner, set_screen_mode_inner, set_scroll_lines_inner,
@@ -53,6 +55,10 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
+    let judgment_enabled_from_app = app.judgment_enabled;
+    let judgment_safety_gate_enabled_from_app = app.judgment_safety_gate_enabled;
+    let judgment_dynamic_reasoning_enabled_from_app = app.judgment_dynamic_reasoning_enabled;
+    let judgment_distillation_enabled_from_app = app.judgment_distillation_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     for agent in app.agents.values_mut() {
         // Walk both `Settings` and `ResetSettingsConfirm`
@@ -90,6 +96,10 @@ pub(crate) fn refresh_open_settings_modals(app: &mut AppView) {
                 respect_manual_folds: respect_manual_folds_from_app,
                 auto_mode_gate: auto_mode_gate_from_app,
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
+                judgment_enabled: judgment_enabled_from_app,
+                judgment_safety_gate_enabled: judgment_safety_gate_enabled_from_app,
+                judgment_dynamic_reasoning_enabled: judgment_dynamic_reasoning_enabled_from_app,
+                judgment_distillation_enabled: judgment_distillation_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app.clone(),
             };
         }
@@ -185,6 +195,10 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
+    let judgment_enabled_from_app = app.judgment_enabled;
+    let judgment_safety_gate_enabled_from_app = app.judgment_safety_gate_enabled;
+    let judgment_dynamic_reasoning_enabled_from_app = app.judgment_dynamic_reasoning_enabled;
+    let judgment_distillation_enabled_from_app = app.judgment_distillation_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     // Theme rows are `hidden_in_minimal`. Snapshot this AppView's mode, not `MINIMAL_MODE_ACTIVE`
     // (other tests flip that process flag in parallel and would drop `theme` from the list).
@@ -235,6 +249,10 @@ pub(in crate::app::dispatch) fn dispatch_open_settings(
         respect_manual_folds: respect_manual_folds_from_app,
         auto_mode_gate: auto_mode_gate_from_app,
         ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
+        judgment_enabled: judgment_enabled_from_app,
+        judgment_safety_gate_enabled: judgment_safety_gate_enabled_from_app,
+        judgment_dynamic_reasoning_enabled: judgment_dynamic_reasoning_enabled_from_app,
+        judgment_distillation_enabled: judgment_distillation_enabled_from_app,
         voice_stt_language: voice_stt_language_from_app,
     };
     let mut state = Box::new(SettingsModalState::new_with_row_visibility(
@@ -619,6 +637,10 @@ pub(crate) fn build_pager_snapshot(app: &AppView) -> crate::settings::PagerLocal
         respect_manual_folds: app.appearance.scrollback.scroll.respect_manual_folds,
         auto_mode_gate: app.auto_mode_gate,
         ask_user_question_timeout_enabled: app.ask_user_question_timeout_enabled,
+        judgment_enabled: app.judgment_enabled,
+        judgment_safety_gate_enabled: app.judgment_safety_gate_enabled,
+        judgment_dynamic_reasoning_enabled: app.judgment_dynamic_reasoning_enabled,
+        judgment_distillation_enabled: app.judgment_distillation_enabled,
         voice_stt_language: app.voice_config.language.clone(),
     }
 }
@@ -681,6 +703,16 @@ pub(in crate::app::dispatch) fn action_for_reset(
         }
         ("toolset.ask_user_question.timeout_enabled", SettingValue::Bool(b)) => {
             Some(Action::SetAskUserQuestionTimeoutEnabled(*b))
+        }
+        ("judgment.enabled", SettingValue::Bool(b)) => Some(Action::SetJudgmentEnabled(*b)),
+        ("judgment.safety_gate_enabled", SettingValue::Bool(b)) => {
+            Some(Action::SetJudgmentSafetyGateEnabled(*b))
+        }
+        ("judgment.dynamic_reasoning_enabled", SettingValue::Bool(b)) => {
+            Some(Action::SetJudgmentDynamicReasoningEnabled(*b))
+        }
+        ("judgment.distillation_enabled", SettingValue::Bool(b)) => {
+            Some(Action::SetJudgmentDistillationEnabled(*b))
         }
         ("keep_text_selection", SettingValue::Enum(s)) => {
             crate::appearance::TextSelection::from_canonical(s).map(Action::SetKeepTextSelection)
@@ -1008,6 +1040,36 @@ pub(in crate::app::dispatch) fn apply_setting_rollback(
                 app.ask_user_question_timeout_enabled = None;
             } else {
                 set_ask_user_question_timeout_enabled_inner(app, *b);
+            }
+        }
+        // judgment.*: same None-restoring shape, so a "reset to default" drops the user-layer
+        // override instead of pinning the default value into config.toml.
+        ("judgment.enabled", SettingValue::Bool(b)) => {
+            if Some(*b) == pr13_effective_default("judgment.enabled") {
+                app.judgment_enabled = None;
+            } else {
+                set_judgment_enabled_inner(app, *b);
+            }
+        }
+        ("judgment.safety_gate_enabled", SettingValue::Bool(b)) => {
+            if Some(*b) == pr13_effective_default("judgment.safety_gate_enabled") {
+                app.judgment_safety_gate_enabled = None;
+            } else {
+                set_judgment_safety_gate_enabled_inner(app, *b);
+            }
+        }
+        ("judgment.dynamic_reasoning_enabled", SettingValue::Bool(b)) => {
+            if Some(*b) == pr13_effective_default("judgment.dynamic_reasoning_enabled") {
+                app.judgment_dynamic_reasoning_enabled = None;
+            } else {
+                set_judgment_dynamic_reasoning_enabled_inner(app, *b);
+            }
+        }
+        ("judgment.distillation_enabled", SettingValue::Bool(b)) => {
+            if Some(*b) == pr13_effective_default("judgment.distillation_enabled") {
+                app.judgment_distillation_enabled = None;
+            } else {
+                set_judgment_distillation_enabled_inner(app, *b);
             }
         }
         ("show_thinking_blocks", SettingValue::Bool(b)) => set_show_thinking_blocks_inner(app, *b),

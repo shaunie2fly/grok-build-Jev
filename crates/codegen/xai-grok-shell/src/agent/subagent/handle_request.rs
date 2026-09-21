@@ -884,6 +884,17 @@ pub(crate) async fn run_shell_child(
             }
         }
     }
+    // After the model is final and any explicit spawn effort has been applied. Explicit
+    // skips the TypeSafe call; otherwise Jev may set effort through apply_supported_effort.
+    apply_dynamic_subagent_effort(
+        &mut effective_sampling_config,
+        &request.subagent_type,
+        &request.prompt,
+        &ctx,
+        effective_runtime.reasoning_effort.as_deref(),
+        &acp::SessionId::new(request.id.clone()),
+    )
+    .await;
     if effective_sampling_config.conversation_group_id.is_none() {
         let inherited_group_id = if let Some(parent_chat_state) = ctx.parent_chat_state.as_ref() {
             parent_chat_state

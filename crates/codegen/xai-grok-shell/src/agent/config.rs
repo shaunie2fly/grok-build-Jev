@@ -1205,6 +1205,12 @@ pub struct Config {
     /// `[auto_mode]` section: Auto permission-mode configuration. See [`AutoModeConfig`].
     #[serde(default)]
     pub auto_mode: AutoModeConfig,
+    /// `[judgment]` section: TypeSafe Jev judgment-provider settings.
+    /// `None` when the section is absent, which is the zero-regression default: no Jev call is
+    /// made anywhere unless the user opts in. Skipped when serializing so the omitted section
+    /// stays omitted through the serialized-defaults merge in `new_from_toml_cfg`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub judgment: Option<xai_grok_config::JudgmentConfig>,
     /// Declared so documented sampling keys are not reported as unrecognized.
     #[serde(default)]
     pub prompt_suggestions: crate::util::config::PromptSuggestConfig,
@@ -1598,6 +1604,7 @@ impl Default for Config {
             doom_loop_recovery: crate::util::config::DoomLoopRecoverySettings::default(),
             worktree: WorktreeConfigSection::default(),
             auto_mode: AutoModeConfig::default(),
+            judgment: None,
             prompt_suggestions: crate::util::config::PromptSuggestConfig::default(),
             feature_values: BTreeMap::new(),
             config_models: IndexMap::new(),

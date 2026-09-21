@@ -1745,10 +1745,60 @@ fn flag_dashboard_at_startup_if_requested(args: &mut PagerArgs) -> Result<()> {
 fn schedule_startup_prewarm() {
     xai_grok_shell::agent::mvp_agent::warm_async_http_client();
 }
+/// Load key-value pairs from `.env` in the current working directory or any parent
+/// into the process environment, unless already defined.
+fn load_dotenv_if_present() {
+    let Ok(start_dir) = std::env::current_dir() else {
+        return;
+    };
+    let mut current = Some(start_dir.as_path());
+    while let Some(dir) = current {
+        let env_file = dir.join(".env");
+        if env_file.is_file() {
+            if let Ok(content) = std::fs::read_to_string(&env_file) {
+                for line in content.lines() {
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
+                    }
+                    let line = trimmed.strip_prefix("export ").unwrap_or(trimmed).trim();
+                    if let Some((raw_key, raw_val)) = line.split_once('=') {
+                        let key = raw_key.trim();
+                        let val = raw_val.trim();
+                        if key.is_empty() {
+                            continue;
+                        }
+                        let val = strip_enclosing_quotes(val);
+                        if std::env::var_os(key).is_none() {
+                            unsafe {
+                                std::env::set_var(key, val);
+                            }
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        current = dir.parent();
+    }
+}
+
+fn strip_enclosing_quotes(s: &str) -> &str {
+    if (s.starts_with('"') && s.ends_with('"')) || (s.starts_with('\'') && s.ends_with('\'')) {
+        let mut chars = s.chars();
+        chars.next();
+        chars.next_back();
+        chars.as_str()
+    } else {
+        s
+    }
+}
+
 fn configure_process_env(mut args: PagerArgs) -> Result<PagerArgs> {
     flag_dashboard_at_startup_if_requested(&mut args)?;
     let args = args.apply_cwd()?;
     unsafe {
+        load_dotenv_if_present();
         if let Some(mode) = args.compaction_mode.as_deref() {
             std::env::set_var("GROK_COMPACTION_MODE", mode);
         }

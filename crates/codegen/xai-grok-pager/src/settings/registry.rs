@@ -271,6 +271,14 @@ pub struct PagerLocalSnapshot {
     /// Live `voice_config.language` at snapshot time.
     /// Lets the modal show the language actually in effect when `[ui].voice_stt_language` is unset but an explicit `[voice].language` applies.
     pub voice_stt_language: String,
+    /// `[judgment].enabled` mirror; `None` means no TOML override, so the default `false` applies.
+    pub judgment_enabled: Option<bool>,
+    /// `[judgment].gate_tools` mirror; `None` means no TOML override, so the default `true` applies.
+    pub judgment_safety_gate_enabled: Option<bool>,
+    /// `[judgment].dynamic_thinking` mirror; `None` means no TOML override, so the default `true` applies.
+    pub judgment_dynamic_reasoning_enabled: Option<bool>,
+    /// `[judgment].distill_outputs` mirror; `None` means no TOML override, so the default `true` applies.
+    pub judgment_distillation_enabled: Option<bool>,
 }
 
 impl Default for PagerLocalSnapshot {
@@ -294,6 +302,10 @@ impl Default for PagerLocalSnapshot {
             auto_mode_gate: false,
             ask_user_question_timeout_enabled: None,
             voice_stt_language: xai_grok_voice::STT_LANGUAGE_DEFAULT.to_string(),
+            judgment_enabled: None,
+            judgment_safety_gate_enabled: None,
+            judgment_dynamic_reasoning_enabled: None,
+            judgment_distillation_enabled: None,
         }
     }
 }
@@ -620,6 +632,20 @@ pub fn current_value_for(
             pager
                 .ask_user_question_timeout_enabled
                 .unwrap_or(ask_user_question::DEFAULT_ASK_USER_QUESTION_TIMEOUT_ENABLED),
+        )),
+        // judgment.*: reflects the `[judgment]` table the modal writes.
+        // `None` means the user has no override, so the registry default applies. The master
+        // switch defaults OFF (zero-regression); the individual levers default ON so that
+        // enabling the master switch alone produces the documented behavior.
+        "judgment.enabled" => Some(SettingValue::Bool(pager.judgment_enabled.unwrap_or(false))),
+        "judgment.safety_gate_enabled" => Some(SettingValue::Bool(
+            pager.judgment_safety_gate_enabled.unwrap_or(true),
+        )),
+        "judgment.dynamic_reasoning_enabled" => Some(SettingValue::Bool(
+            pager.judgment_dynamic_reasoning_enabled.unwrap_or(true),
+        )),
+        "judgment.distillation_enabled" => Some(SettingValue::Bool(
+            pager.judgment_distillation_enabled.unwrap_or(true),
         )),
         // default_selected_permission: maps `[ui].default_selected_permission` onto one of the four registry canonicals
         // `None` or an unrecognised value on disk falls back to `always_allow_all_sessions`, the effective default
@@ -1150,6 +1176,27 @@ mod tests {
                     );
                 }
 
+                // judgment.*: no UiConfig mirror (the section lives under `[judgment]`).
+                // The master switch defaults OFF so an absent section means vanilla behavior.
+                // Each lever defaults ON: `JudgmentConfig`'s own field default is `false` (it is
+                // only consulted when the section exists), but the modal shows a newly-enabled
+                // user the behavior the spec documents, so the UI default is ON.
+                ("judgment.enabled", SettingKind::Bool { default }) => {
+                    assert!(
+                        !*default,
+                        "judgment.enabled must default OFF — the zero-regression guarantee \
+                         depends on an absent `[judgment]` section leaving every subsystem inert"
+                    );
+                }
+                ("judgment.safety_gate_enabled", SettingKind::Bool { default }) => {
+                    assert!(*default, "judgment.safety_gate_enabled defaults ON");
+                }
+                ("judgment.dynamic_reasoning_enabled", SettingKind::Bool { default }) => {
+                    assert!(*default, "judgment.dynamic_reasoning_enabled defaults ON");
+                }
+                ("judgment.distillation_enabled", SettingKind::Bool { default }) => {
+                    assert!(*default, "judgment.distillation_enabled defaults ON");
+                }
                 _ => panic!(
                     "settings::defs::default_settings() contains entry `{}` with no \
                      matching arm in defaults_match_ui_config_default. Add an arm.",

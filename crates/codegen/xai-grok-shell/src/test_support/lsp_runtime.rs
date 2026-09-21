@@ -22,6 +22,7 @@ pub(crate) fn ctx_with_toggle(toggle: HashMap<String, bool>) -> SubagentSpawnCon
         process_scope: None,
         parent_max_turns: None,
         client_hooks: Default::default(),
+        judgment_hook: None,
         sampling_config: xai_grok_sampler::SamplerConfig {
             context_window: 256_000,
             ..Default::default()

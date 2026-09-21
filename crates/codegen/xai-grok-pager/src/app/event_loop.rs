@@ -1591,6 +1591,11 @@ pub(crate) async fn run(
     app.show_tips = config_session_bools.show_tips;
     app.auto_update = config_session_bools.auto_update;
     app.ask_user_question_timeout_enabled = config_session_bools.ask_user_question_timeout_enabled;
+    app.judgment_enabled = config_session_bools.judgment_enabled;
+    app.judgment_safety_gate_enabled = config_session_bools.judgment_safety_gate_enabled;
+    app.judgment_dynamic_reasoning_enabled =
+        config_session_bools.judgment_dynamic_reasoning_enabled;
+    app.judgment_distillation_enabled = config_session_bools.judgment_distillation_enabled;
     crate::appearance::cache::prime(&app.current_ui);
     crate::appearance::cache::apply_remote_keep_text_selection_default(
         remote_settings
@@ -2967,12 +2972,19 @@ struct InitialConfigSessionBools {
     show_tips: Option<bool>,
     auto_update: Option<bool>,
     ask_user_question_timeout_enabled: Option<bool>,
+    judgment_enabled: Option<bool>,
+    judgment_safety_gate_enabled: Option<bool>,
+    judgment_dynamic_reasoning_enabled: Option<bool>,
+    judgment_distillation_enabled: Option<bool>,
 }
 fn load_initial_config_session_bools() -> InitialConfigSessionBools {
     let Ok(root) = xai_grok_shell::config::load_effective_config() else {
         return InitialConfigSessionBools::default();
     };
     let cli_bool = |key: &str| -> Option<bool> { root.get("cli")?.get(key)?.as_bool() };
+    // Read from the raw `[judgment]` table so the modal shows exactly what the user has on disk.
+    // An absent table leaves all four `None`, which is what makes the registry defaults apply.
+    let judgment_bool = |key: &str| -> Option<bool> { root.get("judgment")?.get(key)?.as_bool() };
     InitialConfigSessionBools {
         show_tips: cli_bool("show_tips"),
         auto_update: cli_bool("auto_update"),
@@ -2981,6 +2993,10 @@ fn load_initial_config_session_bools() -> InitialConfigSessionBools {
             .and_then(|t| t.get("ask_user_question"))
             .and_then(|a| a.get("timeout_enabled"))
             .and_then(|v| v.as_bool()),
+        judgment_enabled: judgment_bool("enabled"),
+        judgment_safety_gate_enabled: judgment_bool("gate_tools"),
+        judgment_dynamic_reasoning_enabled: judgment_bool("dynamic_thinking"),
+        judgment_distillation_enabled: judgment_bool("distill_outputs"),
     }
 }
 /// Sync shell `sessionRecap` into the execution gate and every place that offers `/recap`.

@@ -129,6 +129,9 @@ pub struct ThinkingBlock {
     elapsed_time_ms: Option<i64>,
     /// When the thinking block started (local timestamp for live elapsed).
     started_at: Option<std::time::Instant>,
+    /// Effort Jev classified for this turn, when the shell reported one.
+    /// Names the effort the turn actually ran at, which is not necessarily the configured one.
+    dynamic_effort: Option<String>,
 }
 impl ThinkingBlock {
     /// Create a new thinking block with complete text.
@@ -137,6 +140,7 @@ impl ThinkingBlock {
             content: MarkdownContent::new(text),
             elapsed_time_ms: None,
             started_at: None,
+            dynamic_effort: None,
         }
     }
 
@@ -146,6 +150,7 @@ impl ThinkingBlock {
             content: MarkdownContent::streaming(),
             elapsed_time_ms: None,
             started_at: Some(std::time::Instant::now()),
+            dynamic_effort: None,
         }
     }
 
@@ -156,6 +161,7 @@ impl ThinkingBlock {
             content: MarkdownContent::streaming(),
             elapsed_time_ms: None,
             started_at: None,
+            dynamic_effort: None,
         }
     }
 
@@ -205,6 +211,19 @@ impl ThinkingBlock {
     /// When set, the collapsed view will show "Thought for Xs".
     pub fn set_elapsed_time_ms(&mut self, time_ms: Option<i64>) {
         self.elapsed_time_ms = time_ms;
+    }
+
+    /// Record the effort Jev classified for this turn.
+    ///
+    /// The header then names both the effort and its source (`Thinking (high · jev)…`), so a turn
+    /// whose effort Jev lowered does not look like it ran at the configured level.
+    pub fn set_dynamic_effort(&mut self, effort: Option<String>) {
+        self.dynamic_effort = effort;
+    }
+
+    /// The effort Jev classified for this turn, when one was reported.
+    pub fn dynamic_effort(&self) -> Option<&str> {
+        self.dynamic_effort.as_deref()
     }
 
     /// Set the raw mode, re-rendering if it changed.
@@ -269,14 +288,34 @@ impl ThinkingBlock {
         let detail_style = theme.muted();
 
         if ctx.is_running {
-            Line::from(Span::styled("Thinking…", label_style))
+            match &self.dynamic_effort {
+                Some(effort) => Line::from(vec![
+                    Span::styled("Thinking", label_style),
+                    Span::styled(format!(" ({effort} · jev)"), detail_style),
+                    Span::styled("…", label_style),
+                ]),
+                None => Line::from(Span::styled("Thinking…", label_style)),
+            }
         } else if let Some(time_str) = self.format_time() {
-            Line::from(vec![
-                Span::styled("Thought", label_style),
-                Span::styled(format!(" for {time_str}"), detail_style),
-            ])
+            match &self.dynamic_effort {
+                Some(effort) => Line::from(vec![
+                    Span::styled("Thought", label_style),
+                    Span::styled(format!(" ({effort} · jev)"), detail_style),
+                    Span::styled(format!(" for {time_str}"), detail_style),
+                ]),
+                None => Line::from(vec![
+                    Span::styled("Thought", label_style),
+                    Span::styled(format!(" for {time_str}"), detail_style),
+                ]),
+            }
         } else {
-            Line::from(Span::styled("Thought", label_style))
+            match &self.dynamic_effort {
+                Some(effort) => Line::from(vec![
+                    Span::styled("Thought", label_style),
+                    Span::styled(format!(" ({effort} · jev)"), detail_style),
+                ]),
+                None => Line::from(Span::styled("Thought", label_style)),
+            }
         }
     }
 
@@ -818,6 +857,55 @@ mod tests {
         assert_eq!(
             line.bg_start_col, BODY_RAIL_WIDTH as u16,
             "the hoisted fill must start after the rail prefix"
+        );
+    }
+
+    #[test]
+    fn header_names_jev_effort_when_set() {
+        let text_of = |out: &BlockOutput| {
+            out.lines
+                .iter()
+                .map(|l| crate::scrollback::types::line_plain_text(&l.content))
+                .collect::<Vec<_>>()
+                .join("\n")
+        };
+
+        // Running: the ellipsis stays attached to the label, the effort sits in the parenthetical.
+        let mut running = ThinkingBlock::streaming();
+        running.set_dynamic_effort(Some("high".into()));
+        let running_ctx = BlockContext {
+            is_running: true,
+            ..ctx(DisplayMode::Collapsed, 60)
+        };
+        assert_eq!(
+            text_of(&running.output(&running_ctx)),
+            "Thinking (high · jev)…"
+        );
+
+        // Done without a time: effort only.
+        let mut done = ThinkingBlock::new("hello world");
+        done.set_dynamic_effort(Some("low".into()));
+        assert_eq!(
+            text_of(&done.output(&ctx(DisplayMode::Collapsed, 60))),
+            "Thought (low · jev)"
+        );
+
+        // Done with a time: effort before the duration, so the duration still ends the line.
+        done.set_elapsed_time_ms(Some(12300));
+        assert_eq!(
+            text_of(&done.output(&ctx(DisplayMode::Collapsed, 60))),
+            "Thought (low · jev) for 12.3s"
+        );
+
+        // No effort reported: the original header is byte-identical (judgment off / a failed call).
+        done.set_dynamic_effort(None);
+        assert_eq!(
+            text_of(&done.output(&ctx(DisplayMode::Collapsed, 60))),
+            "Thought for 12.3s"
+        );
+        assert_eq!(
+            text_of(&ThinkingBlock::new("hello world").output(&ctx(DisplayMode::Collapsed, 60))),
+            "Thought"
         );
     }
 

@@ -381,6 +381,128 @@ pub(in crate::app::dispatch) fn set_ask_user_question_timeout_enabled(
     }]
 }
 
+/// Mirror a just-written `[judgment]` value in `app` so the modal reflects it.
+/// The effective gate is resolved shell-side once per session, so these are restart-required.
+pub(super) fn set_judgment_enabled_inner(app: &mut AppView, new: bool) {
+    app.judgment_enabled = Some(new);
+}
+
+/// SHELL-owned `[judgment].enabled`; persists via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_judgment_enabled(app: &mut AppView, new: bool) -> Vec<Effect> {
+    judgment_bool_setter(
+        app,
+        new,
+        JudgmentBoolSetting {
+            key: "judgment.enabled",
+            label: "TypeSafe Jev judgment",
+            read: |app| app.judgment_enabled,
+            write: set_judgment_enabled_inner,
+        },
+    )
+}
+
+pub(super) fn set_judgment_safety_gate_enabled_inner(app: &mut AppView, new: bool) {
+    app.judgment_safety_gate_enabled = Some(new);
+}
+
+/// SHELL-owned `[judgment].gate_tools`; persists via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_judgment_safety_gate_enabled(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    judgment_bool_setter(
+        app,
+        new,
+        JudgmentBoolSetting {
+            key: "judgment.safety_gate_enabled",
+            label: "Judgment safety gating",
+            read: |app| app.judgment_safety_gate_enabled,
+            write: set_judgment_safety_gate_enabled_inner,
+        },
+    )
+}
+
+pub(super) fn set_judgment_dynamic_reasoning_enabled_inner(app: &mut AppView, new: bool) {
+    app.judgment_dynamic_reasoning_enabled = Some(new);
+}
+
+/// SHELL-owned `[judgment].dynamic_thinking`; persists via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_judgment_dynamic_reasoning_enabled(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    judgment_bool_setter(
+        app,
+        new,
+        JudgmentBoolSetting {
+            key: "judgment.dynamic_reasoning_enabled",
+            label: "Judgment dynamic reasoning",
+            read: |app| app.judgment_dynamic_reasoning_enabled,
+            write: set_judgment_dynamic_reasoning_enabled_inner,
+        },
+    )
+}
+
+pub(super) fn set_judgment_distillation_enabled_inner(app: &mut AppView, new: bool) {
+    app.judgment_distillation_enabled = Some(new);
+}
+
+/// SHELL-owned `[judgment].distill_outputs`; persists via `Effect::PersistSetting`.
+pub(in crate::app::dispatch) fn set_judgment_distillation_enabled(
+    app: &mut AppView,
+    new: bool,
+) -> Vec<Effect> {
+    judgment_bool_setter(
+        app,
+        new,
+        JudgmentBoolSetting {
+            key: "judgment.distillation_enabled",
+            label: "Judgment output distillation",
+            read: |app| app.judgment_distillation_enabled,
+            write: set_judgment_distillation_enabled_inner,
+        },
+    )
+}
+
+/// One judgment boolean setting: its registry key, toast label, and app-mirror accessors.
+/// The four setters differ only in these, so they share one body rather than repeating the
+/// no-op short-circuit, modal refresh, tracing event, toast, and persist effect four times.
+struct JudgmentBoolSetting {
+    key: &'static str,
+    label: &'static str,
+    read: fn(&AppView) -> Option<bool>,
+    write: fn(&mut AppView, bool),
+}
+
+/// Shared body for a judgment boolean setter. `default` is the registry default for the key, so
+/// the no-op short-circuit and the rollback value agree with the modal's rendered value.
+fn judgment_bool_setter(app: &mut AppView, new: bool, setting: JudgmentBoolSetting) -> Vec<Effect> {
+    // Every judgment lever except the master switch defaults ON; the master switch defaults OFF.
+    let default = setting.key != "judgment.enabled";
+    let prev_state = (setting.read)(app);
+    let prev_effective = prev_state.unwrap_or(default);
+    if prev_effective == new && prev_state.is_some() {
+        return vec![];
+    }
+    (setting.write)(app, new);
+    refresh_open_settings_modals(app);
+    tracing::info!(
+        target: "settings",
+        key = setting.key,
+        value = new,
+        "setting changed",
+    );
+    app.show_toast(&format!(
+        "{} (restart to apply)",
+        save_success_toast(setting.label, new),
+    ));
+    vec![Effect::PersistSetting {
+        key: setting.key,
+        value: crate::settings::SettingValue::Bool(new),
+        rollback_value: crate::settings::SettingValue::Bool(prev_effective),
+    }]
+}
+
 pub(super) fn set_show_thinking_blocks_inner(app: &mut AppView, new: bool) {
     crate::appearance::cache::set_show_thinking_blocks(new);
     // Thinking visibility reshapes verb-group runs (shown thoughts claim into folds) AND dense N-more runs (hidden thoughts stop counting toward truncation)

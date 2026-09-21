@@ -799,6 +799,89 @@
     /// A context overflow shows the actionable `ContextTooLarge` prompt (not the raw `RetryFailed`).
     /// `PromptResponse` then suppresses the redundant `TurnFailed`.
     #[test]
+    fn dynamic_reasoning_effort_notification_restamps_the_live_thinking_header() {
+        use crate::scrollback::block::RenderBlock;
+        crate::appearance::cache::set_show_thinking_blocks(true);
+        let mut app = make_app_with_agent("sess-jev");
+        let id = AgentId(0);
+        {
+            let agent = app.agents.get_mut(&id).unwrap();
+            agent.session.tracker.handle_update(
+                acp::SessionUpdate::AgentThoughtChunk(acp::ContentChunk::new(
+                    acp::ContentBlock::Text(acp::TextContent::new(
+                        "weighing options".to_string(),
+                    )),
+                )),
+                &crate::acp::meta::NotificationMeta::default(),
+                &mut agent.scrollback,
+            );
+        }
+        let effort_of_last_block = |app: &AppView| {
+            app.agents
+                .get(&id)
+                .and_then(|a| a.scrollback.last())
+                .and_then(|e| match &e.block {
+                    RenderBlock::Thinking(t) => t.dynamic_effort().map(str::to_string),
+                    _ => None,
+                })
+        };
+        assert_eq!(
+            effort_of_last_block(&app),
+            None,
+            "precondition: no classification has arrived yet"
+        );
+
+        let changed =
+            handle_session_notification(&dynamic_reasoning_ext("sess-jev", "high"), &mut app);
+        assert!(changed, "a first classification must redraw");
+        assert_eq!(
+            app.agents.get(&id).unwrap().dynamic_reasoning_effort(),
+            Some("high"),
+            "the model label reads the effort the turn is running at"
+        );
+        assert_eq!(
+            effort_of_last_block(&app),
+            Some("high".to_string()),
+            "the already-streaming block must name the classified effort"
+        );
+    }
+    #[test]
+    fn replayed_dynamic_reasoning_effort_is_ignored() {
+        // A reconnect replay must not restamp the fresh live turn's block with a historical effort.
+        let mut app = make_app_with_agent("sess-jev-replay");
+        let changed = handle_session_notification(
+            &dynamic_reasoning_ext_replay("sess-jev-replay", "minimal"),
+            &mut app,
+        );
+        assert!(!changed);
+        assert_eq!(
+            app.agents.get(&AgentId(0)).unwrap().dynamic_reasoning_effort(),
+            None
+        );
+    }
+    fn dynamic_reasoning_ext(session_id: &str, effort: &str) -> acp::ExtNotification {
+        dynamic_reasoning_ext_with_meta(session_id, effort, None)
+    }
+    fn dynamic_reasoning_ext_replay(session_id: &str, effort: &str) -> acp::ExtNotification {
+        dynamic_reasoning_ext_with_meta(session_id, effort, Some(true))
+    }
+    fn dynamic_reasoning_ext_with_meta(
+        session_id: &str,
+        effort: &str,
+        is_replay: Option<bool>,
+    ) -> acp::ExtNotification {
+        let payload = serde_json::json!({
+            "sessionId": session_id,
+            "update": { "sessionUpdate": "dynamic_reasoning_effort", "effort": effort },
+            "_meta": is_replay.map(|r| serde_json::json!({ "isReplay": r })),
+        });
+        acp::ExtNotification::new(
+            "x.ai/session_notification",
+            std::sync::Arc::from(serde_json::value::to_raw_value(&payload).unwrap()),
+        )
+    }
+
+    #[test]
     fn apply_retry_state_context_length_shows_context_too_large() {
         use xai_grok_shell::extensions::notification::CONTEXT_LENGTH_ERROR_TYPE;
         let mut session = make_session(Some("s1"));

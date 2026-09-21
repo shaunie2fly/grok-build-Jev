@@ -75,6 +75,11 @@ async fn save_config_locked(
     }
     merge_section(table, "telemetry", &config.telemetry);
     merge_section(table, "features", &config.features);
+    // Only when the load saw a `[judgment]` table: a settings save must never invent a section
+    // the user does not have, or merely opening the modal would opt them into judgment.
+    if let Some(judgment) = &config.judgment {
+        merge_section(table, "judgment", judgment);
+    }
     let toml_str = toml::to_string_pretty(&root)?;
     let dest = require_same_user_config_dest(slot, &dest)?;
     guard

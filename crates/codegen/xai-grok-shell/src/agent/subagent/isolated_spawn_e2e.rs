@@ -41,6 +41,8 @@ fn spawn_ctx(parent_cwd: PathBuf) -> SubagentSpawnContext {
             context_window: 256_000,
             ..Default::default()
         },
+        // No judgment in the isolated-spawn fixture: the child inherits the parent's effort.
+        judgment_hook: None,
         #[cfg(test)]
         setup_failure: None,
         #[cfg(test)]

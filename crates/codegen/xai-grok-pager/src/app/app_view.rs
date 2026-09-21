@@ -1040,6 +1040,15 @@ pub struct AppView {
     /// Persisted `[toolset.ask_user_question].timeout_enabled` mirror, seeded from the effective TOML merge like `show_tips`.
     /// `None` means unset in TOML (default `true`); toggles write the user layer.
     pub ask_user_question_timeout_enabled: Option<bool>,
+    /// Persisted `[judgment].enabled` mirror, seeded from the effective TOML merge like `show_tips`.
+    /// `None` means unset in TOML, so the registry default (`false`) applies; toggles write the user layer.
+    pub judgment_enabled: Option<bool>,
+    /// Persisted `[judgment].gate_tools` mirror. `None` means unset (default `true`).
+    pub judgment_safety_gate_enabled: Option<bool>,
+    /// Persisted `[judgment].dynamic_thinking` mirror. `None` means unset (default `true`).
+    pub judgment_dynamic_reasoning_enabled: Option<bool>,
+    /// Persisted `[judgment].distill_outputs` mirror. `None` means unset (default `true`).
+    pub judgment_distillation_enabled: Option<bool>,
     /// Whether ZDR users are allowed to use the product.
     /// Server-controlled via RemoteSettings (remote settings). Default `false` (blocked) during beta.
     pub zdr_access_enabled: bool,
@@ -1558,6 +1567,10 @@ impl AppView {
             show_tips: None,
             auto_update: None,
             ask_user_question_timeout_enabled: None,
+            judgment_enabled: None,
+            judgment_safety_gate_enabled: None,
+            judgment_dynamic_reasoning_enabled: None,
+            judgment_distillation_enabled: None,
             zdr_access_enabled: false,
             usage_billing_redirect_url: None,
             access_gate_shown_logged: false,
@@ -4479,10 +4492,22 @@ impl AppView {
                             };
                             let model_name_base =
                                 self.models.current_model_name().unwrap_or_default();
-                            let model_name = match self.models.reasoning_effort {
-                                Some(eff) => format!("{model_name_base} ({eff})"),
-                                None => model_name_base,
-                            };
+                            // A welcome screen has no turn yet, so there is no classified effort to name: the
+                            // marker only says that Jev will pick one per prompt.
+                            let model_name =
+                                if self.judgment_dynamic_reasoning_enabled.unwrap_or(true) {
+                                    match self.models.reasoning_effort {
+                                        Some(eff) => {
+                                            format!("{model_name_base} ({eff} · dynamic)")
+                                        }
+                                        None => format!("{model_name_base} (dynamic)"),
+                                    }
+                                } else {
+                                    match self.models.reasoning_effort {
+                                        Some(eff) => format!("{model_name_base} ({eff})"),
+                                        None => model_name_base,
+                                    }
+                                };
                             let hero_cta = crate::views::announcements::promo_cta(
                                 &self.active_announcements,
                                 &self.hidden_announcement_ids,
@@ -4804,6 +4829,9 @@ impl AppView {
                                             .workspace_dashboard_enabled,
                                         overlay_header,
                                         overlay_stop_label: None,
+                                        judgment_dynamic_reasoning_enabled: self
+                                            .judgment_dynamic_reasoning_enabled
+                                            .unwrap_or(true),
                                     },
                                 );
                                 if let Some(modal) = self.import_claude_modal.as_mut() {
@@ -4936,6 +4964,9 @@ impl AppView {
                                                         AppRenderParams {
                                                             workspace_dashboard_enabled: self
                                                                 .workspace_dashboard_enabled,
+                                                            judgment_dynamic_reasoning_enabled: self
+                                                                .judgment_dynamic_reasoning_enabled
+                                                                .unwrap_or(true),
                                                             ..Default::default()
                                                         },
                                                     )

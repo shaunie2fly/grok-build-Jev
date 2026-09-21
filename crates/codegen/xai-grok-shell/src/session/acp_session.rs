@@ -776,6 +776,11 @@ pub(crate) struct SessionActor {
     /// Actor-based chat state handle; manages conversation, tokens, timing, and persistence.
     /// Also stores credentials (api_key, optional extra access key, client_version) opaquely.
     pub(crate) chat_state_handle: xai_chat_state::ChatStateHandle,
+    /// `[judgment]` Jev hook, built once per session on first use.
+    /// `OnceLock` so the HTTP client is constructed at most once and only when a turn actually
+    /// needs a judgment; `None` (the unconfigured case) is cached too, so the config read happens
+    /// once rather than per turn.
+    pub(crate) judgment_hook: std::sync::OnceLock<Option<crate::judgment::JudgmentHook>>,
     /// Current running prompt/turn id, shared with SessionHandle.
     pub(crate) current_prompt_id: std::sync::Arc<std::sync::Mutex<Option<String>>>,
     pub(crate) active_work: std::sync::Arc<std::sync::atomic::AtomicUsize>,
@@ -1687,6 +1692,10 @@ mod fs_injection_regression_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/interjection_actor_tests.rs"]
 mod interjection_actor_tests;
+/// Subsystem 1 is parent-only: child sessions must not re-classify spawn-time effort.
+#[cfg(test)]
+#[path = "acp_session_tests/judgment_dynamic_reasoning_tests.rs"]
+mod judgment_dynamic_reasoning_tests;
 #[cfg(test)]
 #[path = "acp_session_tests/observability_bridge_mapping_tests.rs"]
 mod observability_bridge_mapping_tests;

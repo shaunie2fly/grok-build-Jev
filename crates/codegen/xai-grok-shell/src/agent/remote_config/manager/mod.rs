@@ -529,6 +529,26 @@ impl ModelsManager {
             .unwrap_or_default()
     }
 
+    /// Thinking-menu values the model will accept on the wire, for Jev to map onto.
+    /// Unsupported models yield an empty list (Jev must not change effort).
+    /// A supported model with an empty `reasoning_efforts` table falls back to the built-in
+    /// picker (`low` / `medium` / `high` / `xhigh`).
+    pub(crate) fn offered_reasoning_effort_values(&self, model_id: &str) -> Vec<ReasoningEffort> {
+        if !self.model_supports_reasoning_effort(model_id) {
+            return Vec::new();
+        }
+        let options = self.model_reasoning_efforts(model_id);
+        if options.is_empty() {
+            return vec![
+                ReasoningEffort::Low,
+                ReasoningEffort::Medium,
+                ReasoningEffort::High,
+                ReasoningEffort::Xhigh,
+            ];
+        }
+        options.into_iter().map(|option| option.value).collect()
+    }
+
     pub(crate) fn model_supports_reasoning_effort_value(
         &self,
         model_id: &str,

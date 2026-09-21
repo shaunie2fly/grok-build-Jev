@@ -252,6 +252,11 @@ impl MvpAgent {
             process_scope: parent_process_scope,
             client_hooks: Default::default(),
             sampling_config: self.sampling_config.borrow().clone(),
+            // Subsystem 2 seam: the same overlay-free disk resolver the parent session uses.
+            // Agent `Config.judgment` can include the `GROK_CONFIG` overlay; that channel must
+            // not spend a TypeSafe credential, so children must not read it.
+            judgment_hook: crate::agent::judgment_config::resolve_judgment_hook()
+                .map(std::sync::Arc::new),
             #[cfg(test)]
             setup_failure: None,
             #[cfg(test)]

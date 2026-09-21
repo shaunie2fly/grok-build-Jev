@@ -1184,6 +1184,10 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
     let respect_manual_folds_from_app = app.appearance.scrollback.scroll.respect_manual_folds;
     let auto_mode_gate_from_app = app.auto_mode_gate;
     let ask_user_question_timeout_enabled_from_app = app.ask_user_question_timeout_enabled;
+    let judgment_enabled_from_app = app.judgment_enabled;
+    let judgment_safety_gate_enabled_from_app = app.judgment_safety_gate_enabled;
+    let judgment_dynamic_reasoning_enabled_from_app = app.judgment_dynamic_reasoning_enabled;
+    let judgment_distillation_enabled_from_app = app.judgment_distillation_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
     let result = {
         let Some(invocation) = parse_invocation(trimmed.as_str()) else {
@@ -1270,6 +1274,10 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 respect_manual_folds: respect_manual_folds_from_app,
                 auto_mode_gate: auto_mode_gate_from_app,
                 ask_user_question_timeout_enabled: ask_user_question_timeout_enabled_from_app,
+                judgment_enabled: judgment_enabled_from_app,
+                judgment_safety_gate_enabled: judgment_safety_gate_enabled_from_app,
+                judgment_dynamic_reasoning_enabled: judgment_dynamic_reasoning_enabled_from_app,
+                judgment_distillation_enabled: judgment_distillation_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app,
             },
         };

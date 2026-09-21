@@ -92,6 +92,7 @@ async fn create_test_actor(
         delivery_tools: std::cell::RefCell::new(Vec::new()),
         attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
         chat_state_handle,
+        judgment_hook: std::sync::OnceLock::new(),
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
         current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_interactions: std::sync::Arc::new(std::sync::Mutex::new(
@@ -517,6 +518,7 @@ async fn create_test_actor_with_memory(
         delivery_tools: std::cell::RefCell::new(Vec::new()),
         attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
         chat_state_handle,
+        judgment_hook: std::sync::OnceLock::new(),
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
         current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
         pending_interactions: std::sync::Arc::new(std::sync::Mutex::new(

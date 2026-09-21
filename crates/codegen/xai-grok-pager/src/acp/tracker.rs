@@ -419,6 +419,13 @@ pub struct AcpUpdateTracker {
     /// `acp_handler::handle_session_notification` drains this synchronously after each `handle_update` call, so it
     /// never accumulates. A meta-less follow-up update intentionally preserves the previous `Some`.
     pending_acp_tools: Option<Vec<String>>,
+    /// Effort Jev classified for the current turn, when the shell reported one.
+    /// Stamped onto each thinking block created this turn and cleared by `finish_turn`, so it can never name
+    /// the effort of a previous turn.
+    pub dynamic_reasoning_effort: Option<String>,
+    /// Effort Jev classified for the most recent turn. Preserved across `finish_turn` so UI surfaces
+    /// can continue to show the Jev-classified effort after turn completion.
+    pub last_dynamic_reasoning_effort: Option<String>,
     /// Live Edit completions awaiting full-file HL (drained via [`Self::take_pending_edit_hl`]).
     pending_edit_hl: Vec<EntryId>,
 }
@@ -1041,6 +1048,7 @@ impl AcpUpdateTracker {
         }
         self.last_thinking_elapsed_ms = None;
         self.last_stream_start_ms = None;
+        self.dynamic_reasoning_effort = None;
         self.compaction_activity = None;
         self.retry_activity = None;
         self.hooks_running = None;
@@ -1075,11 +1083,37 @@ impl AcpUpdateTracker {
             return;
         }
         if self.current_thinking.is_none() {
-            let block = RenderBlock::thinking_streaming();
+            let mut block = RenderBlock::thinking_streaming();
+            if let RenderBlock::Thinking(thinking) = &mut block {
+                thinking.set_dynamic_effort(self.dynamic_reasoning_effort.clone());
+            }
             let entry_id = scrollback.push_block(block);
             scrollback.set_last_running(true);
             self.current_thinking = Some(entry_id);
         }
+    }
+    /// Record the effort Jev classified for this turn and restamp the live thinking block, so the header reflects
+    /// the classification as soon as it lands rather than only on the next thinking block.
+    ///
+    /// Returns whether the painted header actually changed. A block already carrying this effort — the common case,
+    /// since the classification arrives once per turn before the first chunk — is left untouched, so callers can use
+    /// the return value as their redraw signal without repainting on every duplicate notification.
+    pub fn set_dynamic_reasoning_effort(
+        &mut self,
+        effort: Option<String>,
+        scrollback: &mut ScrollbackState,
+    ) -> bool {
+        if let Some(ref eff) = effort {
+            self.last_dynamic_reasoning_effort = Some(eff.clone());
+        }
+        if self.dynamic_reasoning_effort == effort {
+            return false;
+        }
+        self.dynamic_reasoning_effort = effort;
+        let Some(entry_id) = self.current_thinking else {
+            return false;
+        };
+        scrollback.set_thinking_dynamic_effort(entry_id, self.dynamic_reasoning_effort.clone())
     }
     /// Mark that the next UserMessageChunk should be silently dropped.
     ///
@@ -1153,12 +1187,16 @@ impl AcpUpdateTracker {
             return false;
         }
         let is_replay = meta.is_replay;
+        let dynamic_effort = self.dynamic_reasoning_effort.clone();
         let id = *self.current_thinking.get_or_insert_with(|| {
-            let block = if is_replay {
+            let mut block = if is_replay {
                 RenderBlock::thinking_streaming_replay()
             } else {
                 RenderBlock::thinking_streaming()
             };
+            if let RenderBlock::Thinking(thinking) = &mut block {
+                thinking.set_dynamic_effort(dynamic_effort);
+            }
             let entry_id = scrollback.push_block(block);
             scrollback.set_last_running(true);
             entry_id

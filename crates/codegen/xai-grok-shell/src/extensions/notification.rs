@@ -1160,6 +1160,14 @@ pub enum SessionUpdate {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         stop_sequence: Option<String>,
     },
+    /// Jev classified this turn's reasoning effort, so the pager can name the effort the turn is
+    /// actually running at (`Thinking (high · jev)…`) instead of only the configured one.
+    /// Fire-and-forget, **never persisted**: it describes the live turn, and the turn's own
+    /// transcript rows already carry their effort in the block header.
+    DynamicReasoningEffort {
+        /// The classified effort (`minimal` / `low` / `medium` / `high`).
+        effort: String,
+    },
     /// Catch-all for unrecognized session update types.
     /// Allows forward/backward compatibility when variants are added or removed.
     /// All fields from the unrecognized variant are discarded during deserialization.
@@ -2027,6 +2035,22 @@ mod tests {
         let json_str = serde_json::to_string(&update).unwrap();
         let parsed: SessionUpdate = serde_json::from_str(&json_str).unwrap();
         assert_eq!(update, parsed);
+    }
+
+    #[test]
+    fn dynamic_reasoning_effort_roundtrips_through_json() {
+        let update = SessionUpdate::DynamicReasoningEffort {
+            effort: "high".into(),
+        };
+        let json = serde_json::to_value(&update).unwrap();
+        assert_eq!(
+            json.get("sessionUpdate"),
+            Some(&serde_json::json!("dynamic_reasoning_effort")),
+            "frozen pager-facing wire tag"
+        );
+        assert_eq!(json.get("effort"), Some(&serde_json::json!("high")));
+        let parsed: SessionUpdate = serde_json::from_value(json).unwrap();
+        assert_eq!(parsed, update);
     }
 
     #[test]

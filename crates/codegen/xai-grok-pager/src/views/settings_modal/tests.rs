@@ -717,6 +717,11 @@ fn rows_contain_categories_and_settings_through_pr_14() {
             "default_selected_permission",
             // SHELL-owned ask_user_question timeout (Agent category, registered directly above plan_mode)
             "toolset.ask_user_question.timeout_enabled",
+            // SHELL-owned judgment.* (Agent category, registered directly above plan_mode).
+            "judgment.enabled",
+            "judgment.safety_gate_enabled",
+            "judgment.dynamic_reasoning_enabled",
+            "judgment.distillation_enabled",
             // PAGER-owned plan_mode (Agent category).
             "plan_mode",
             // SHELL-owned coding_data_sharing (Privacy category).

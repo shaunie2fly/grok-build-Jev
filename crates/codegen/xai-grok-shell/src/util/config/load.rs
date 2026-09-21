@@ -109,6 +109,11 @@ pub fn load_config_from_toml(root: &TomlValue) -> Config {
         consent: section(table, "consent"),
         telemetry: section(table, "telemetry"),
         features: section(table, "features"),
+        // Absent or malformed `[judgment]` stays `None`, matching the runtime resolver: a typo in
+        // an optional section must degrade to vanilla behavior, not fail the settings load.
+        judgment: table
+            .get("judgment")
+            .and_then(|v| v.clone().try_into().ok()),
     }
 }
 #[cfg(test)]

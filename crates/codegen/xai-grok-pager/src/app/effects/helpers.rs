@@ -1226,6 +1226,42 @@ pub(crate) async fn persist_setting(
                 .await
                 .map_err(|e| e.to_string())
         }
+        "judgment.enabled" => {
+            let SettingValue::Bool(b) = value else {
+                return Err(kind_mismatch("judgment.enabled", "Bool", &value));
+            };
+            xai_grok_shell::util::config::set_judgment_enabled(b)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "judgment.safety_gate_enabled" => {
+            let SettingValue::Bool(b) = value else {
+                return Err(kind_mismatch("judgment.safety_gate_enabled", "Bool", &value));
+            };
+            xai_grok_shell::util::config::set_judgment_safety_gate_enabled(b)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "judgment.dynamic_reasoning_enabled" => {
+            let SettingValue::Bool(b) = value else {
+                return Err(kind_mismatch(
+                    "judgment.dynamic_reasoning_enabled",
+                    "Bool",
+                    &value,
+                ));
+            };
+            xai_grok_shell::util::config::set_judgment_dynamic_reasoning_enabled(b)
+                .await
+                .map_err(|e| e.to_string())
+        }
+        "judgment.distillation_enabled" => {
+            let SettingValue::Bool(b) = value else {
+                return Err(kind_mismatch("judgment.distillation_enabled", "Bool", &value));
+            };
+            xai_grok_shell::util::config::set_judgment_distillation_enabled(b)
+                .await
+                .map_err(|e| e.to_string())
+        }
         "show_thinking_blocks" => {
             let SettingValue::Bool(b) = value else {
                 return Err(kind_mismatch("show_thinking_blocks", "Bool", &value));

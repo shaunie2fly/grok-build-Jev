@@ -53,6 +53,9 @@ pub struct AppRenderParams<'a> {
     /// The footer's `Ctrl+X` label when this view stands in for another agent (a subagent's fullscreen takeover): the
     /// parent's resolved stop/archive/close action, which the child cannot compute from its own state.
     pub overlay_stop_label: Option<&'static str>,
+    /// Persisted `[judgment].dynamic_thinking` (`true` when unset), so the model label can say that the turn's
+    /// reasoning effort is being chosen per-prompt instead of showing a bare configured effort.
+    pub judgment_dynamic_reasoning_enabled: bool,
 }
 /// What the dashboard overlay contributes to the header row (see [`AppRenderParams::overlay_header`]).
 #[derive(Debug, Clone, Copy, Default)]
@@ -588,6 +591,7 @@ impl AgentView {
             workspace_dashboard_enabled,
             overlay_header,
             overlay_stop_label,
+            judgment_dynamic_reasoning_enabled,
         } = app_params;
         self.scrollback.begin_frame();
         self.in_dashboard_overlay = in_dashboard_overlay;
@@ -2338,9 +2342,21 @@ impl AgentView {
         let usage_warning_text: Option<String> = warning.as_ref().map(|(t, _)| t.clone());
         let usage_warning = usage_warning_text.as_deref();
         let usage_warning_critical = warning.is_some_and(|(_, critical)| critical);
-        let model_label = match self.session.models.reasoning_effort {
-            Some(eff) => format!("{model_id} ({eff})"),
-            None => model_id,
+        let model_label = match self.dynamic_reasoning_effort() {
+            Some(jev_effort) => format!("{model_id} (jev: {jev_effort})"),
+            None if judgment_dynamic_reasoning_enabled => {
+                match self.last_dynamic_reasoning_effort() {
+                    Some(jev_effort) => format!("{model_id} (jev: {jev_effort})"),
+                    None => match self.session.models.reasoning_effort {
+                        Some(eff) => format!("{model_id} ({eff} · dynamic)"),
+                        None => format!("{model_id} (dynamic)"),
+                    },
+                }
+            }
+            None => match self.session.models.reasoning_effort {
+                Some(eff) => format!("{model_id} ({eff})"),
+                None => model_id,
+            },
         };
         let info = match &self.prompt_mode {
             PromptMode::Normal => PromptInfo {

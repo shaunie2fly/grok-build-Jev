@@ -22,6 +22,92 @@ fn batch(event_name: &str, tool_name: Option<&str>) -> HookBatchId {
     }
 }
 #[test]
+fn dynamic_effort_is_stamped_on_the_live_thinking_block_and_cleared_at_turn_end() {
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let mut sb = ScrollbackState::new();
+    let mut tracker = AcpUpdateTracker::new();
+    tracker.pre_create_thinking(&mut sb);
+    let entry_id = tracker.current_thinking.expect("pre-created thinking");
+
+    assert!(
+        tracker.set_dynamic_reasoning_effort(Some("high".into()), &mut sb),
+        "stamping a new effort onto a live block is a repaint"
+    );
+    assert_eq!(
+        thinking_effort(&sb, entry_id).as_deref(),
+        Some("high"),
+        "the live block must name the classified effort"
+    );
+    assert!(
+        !tracker.set_dynamic_reasoning_effort(Some("high".into()), &mut sb),
+        "the same effort must not request a repaint"
+    );
+
+    tracker.finish_turn(&mut sb);
+    assert_eq!(
+        tracker.dynamic_reasoning_effort, None,
+        "a turn's effort must not leak into the next turn's label"
+    );
+}
+#[test]
+fn dynamic_effort_set_before_the_first_chunk_lands_on_the_created_block() {
+    // The shell classifies before the turn samples, so the notification routinely arrives before any chunk:
+    // the effort must be on the block the stream creates, not only on one that already existed.
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let mut sb = ScrollbackState::new();
+    let mut tracker = AcpUpdateTracker::new();
+    assert!(
+        !tracker.set_dynamic_reasoning_effort(Some("low".into()), &mut sb),
+        "nothing is streamed yet, so there is no header to repaint"
+    );
+    tracker.handle_update(thought_chunk("reasoning"), &meta(), &mut sb);
+    let entry_id = tracker.current_thinking.expect("thinking entry");
+    assert_eq!(thinking_effort(&sb, entry_id).as_deref(), Some("low"));
+    assert_eq!(
+        sb.get_by_id(entry_id).map(thinking_header_text),
+        Some("Thinking (low · jev)…".to_string()),
+        "the running header must name the classified effort"
+    );
+}
+#[test]
+fn dynamic_effort_absent_leaves_the_header_unchanged() {
+    crate::appearance::cache::set_show_thinking_blocks(true);
+    let mut sb = ScrollbackState::new();
+    let mut tracker = AcpUpdateTracker::new();
+    tracker.handle_update(thought_chunk("reasoning"), &meta(), &mut sb);
+    let entry_id = tracker.current_thinking.expect("thinking entry");
+    assert_eq!(thinking_effort(&sb, entry_id), None);
+}
+/// The classified effort carried by a scrollback thinking entry, if any.
+fn thinking_effort(sb: &ScrollbackState, id: crate::scrollback::entry::EntryId) -> Option<String> {
+    match &sb.get_by_id(id)?.block {
+        RenderBlock::Thinking(t) => t.dynamic_effort().map(str::to_string),
+        _ => None,
+    }
+}
+/// A thinking entry's painted header text (always the running header, so the effort is visible).
+fn thinking_header_text(entry: &crate::scrollback::entry::ScrollbackEntry) -> String {
+    use crate::scrollback::block::BlockContent;
+    let RenderBlock::Thinking(t) = &entry.block else {
+        return String::new();
+    };
+    let ctx = crate::scrollback::types::BlockContext {
+        mode: crate::scrollback::types::DisplayMode::Collapsed,
+        is_running: true,
+        width: 80,
+        raw: false,
+        max_lines: None,
+        appearance: crate::appearance::AppearanceConfig::default(),
+        is_selected: false,
+        cwd: None,
+    };
+    t.output(&ctx)
+        .lines
+        .first()
+        .map(|l| crate::scrollback::types::line_plain_text(&l.content))
+        .unwrap_or_default()
+}
+#[test]
 fn workflow_suppression_keeps_authoring_calls_visible() {
     let wf = |title: &str, raw: serde_json::Value| {
         acp::ToolCall::new(acp::ToolCallId::new(Arc::from("t1")), title.to_string())

@@ -1741,6 +1741,20 @@ fn move_setting_away_from_default(app: &mut AppView, key: crate::settings::Setti
                 app,
             );
         }
+        // judgment.*: the master switch defaults OFF, the levers default ON, so move each in
+        // the opposite direction from its registry default.
+        "judgment.enabled" => {
+            let _ = dispatch(Action::SetJudgmentEnabled(true), app);
+        }
+        "judgment.safety_gate_enabled" => {
+            let _ = dispatch(Action::SetJudgmentSafetyGateEnabled(false), app);
+        }
+        "judgment.dynamic_reasoning_enabled" => {
+            let _ = dispatch(Action::SetJudgmentDynamicReasoningEnabled(false), app);
+        }
+        "judgment.distillation_enabled" => {
+            let _ = dispatch(Action::SetJudgmentDistillationEnabled(false), app);
+        }
         other => {
             panic!(
                 "move_setting_away_from_default: no arm for `{other}`. \

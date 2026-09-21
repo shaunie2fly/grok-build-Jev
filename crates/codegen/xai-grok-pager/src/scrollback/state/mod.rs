@@ -774,6 +774,28 @@ impl ScrollbackState {
         false
     }
 
+    /// Stamp the Jev-classified effort onto a live thinking entry.
+    ///
+    /// Same invalidation contract as [`Self::push_chunk_to_thinking`]: the header text is part of the cached output,
+    /// so clearing the cache and marking the height dirty is what makes the new label visible without waiting for
+    /// the next chunk.
+    /// Returns false when the entry is gone or is not a thinking block.
+    pub fn set_thinking_dynamic_effort(&mut self, id: EntryId, effort: Option<String>) -> bool {
+        if let Some(entry) = self.entries.get_mut(&id)
+            && let RenderBlock::Thinking(ref mut block) = entry.block
+        {
+            if block.dynamic_effort() == effort.as_deref() {
+                return false;
+            }
+            block.set_dynamic_effort(effort);
+            entry.invalidate_cache();
+            self.dirty_heights.insert(id);
+            self.bump_content_generation();
+            return true;
+        }
+        false
+    }
+
     /// Push a chunk to a thinking entry without rendering markdown yet.
     pub fn push_chunk_to_thinking_deferred(&mut self, id: EntryId, chunk: &str) -> bool {
         if let Some(entry) = self.entries.get_mut(&id)

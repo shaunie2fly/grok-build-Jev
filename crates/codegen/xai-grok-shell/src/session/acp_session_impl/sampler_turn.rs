@@ -1038,7 +1038,233 @@ impl SessionActor {
         }
         // Carry over the session's per-chunk idle timeout via `SamplerConfig.idle_timeout_secs`
         sampler_config.idle_timeout_secs = Some(self.inference_idle_timeout.as_secs());
+        self.apply_dynamic_reasoning_effort(&mut sampler_config)
+            .await;
         self.sampler_handle.update_config(sampler_config);
+    }
+
+    /// Subsystem 1: let Jev choose this turn's reasoning effort from the prompt.
+    ///
+    /// Parent sessions only. Child sessions keep the spawn-time effort from Subsystem 2;
+    /// re-classifying here with `subagent_type = None` would drop the explore pin, clobber an
+    /// explicit spawn override, and make `dynamic_subagent_thinking = false` a no-op whenever
+    /// `dynamic_thinking` (default on) is enabled.
+    ///
+    /// Gated on `[judgment] enabled + dynamic_thinking`. Every failure path (no hook, no prompt,
+    /// timeout, HTTP error, malformed body) leaves the configured effort untouched, so vanilla
+    /// behavior is the floor rather than something a judgment outage can regress.
+    pub(crate) async fn apply_dynamic_reasoning_effort(
+        &self,
+        sampler_config: &mut xai_grok_sampler::SamplerConfig,
+    ) {
+        if self.startup_hints.is_subagent {
+            return;
+        }
+        let Some(hook) = self.judgment_hook() else {
+            return;
+        };
+        if !hook.dynamic_thinking_enabled() {
+            return;
+        }
+        let Some(prompt) = self.chat_state_handle.get_last_user_query_text().await else {
+            return;
+        };
+        if prompt.trim().is_empty() {
+            return;
+        }
+        let offered = self
+            .models_manager
+            .offered_reasoning_effort_values(&sampler_config.model);
+        let Some(effort) = hook
+            .evaluator()
+            .classify_reasoning(&prompt, None, &offered)
+            .await
+        else {
+            xai_grok_telemetry::unified_log::warn(
+                "judgment.dynamic_reasoning.no_classification",
+                Some(self.session_info.id.0.as_ref()),
+                Some(serde_json::json!({
+                    "prompt_len": prompt.len(),
+                })),
+            );
+            return;
+        };
+        match effort.parse::<xai_grok_sampling_types::ReasoningEffort>() {
+            Ok(parsed) => {
+                sampler_config.reasoning_effort = Some(parsed);
+                xai_grok_telemetry::unified_log::info(
+                    "judgment.dynamic_reasoning.applied",
+                    Some(self.session_info.id.0.as_ref()),
+                    Some(serde_json::json!({
+                        "effort": effort,
+                    })),
+                );
+                self.send_xai_notification_transient(
+                    crate::extensions::notification::SessionUpdate::DynamicReasoningEffort {
+                        effort: effort.to_owned(),
+                    },
+                );
+            }
+            Err(e) => {
+                xai_grok_telemetry::unified_log::warn(
+                    "judgment.dynamic_reasoning.parse_failed",
+                    Some(self.session_info.id.0.as_ref()),
+                    Some(serde_json::json!({
+                        "effort": effort,
+                        "error": e.to_string(),
+                    })),
+                );
+                tracing::warn!(
+                    %effort,
+                    error = %e,
+                    "Jev returned an unusable reasoning effort; keeping the configured effort"
+                );
+            }
+        }
+    }
+
+    /// The session's `[judgment]` hook, resolved once on first use.
+    ///
+    /// Returns `None` when the section is absent, disabled, or has no credential — the
+    /// zero-regression default. Both outcomes are memoized, so the config read happens once per
+    /// session rather than once per turn.
+    pub(crate) fn judgment_hook(&self) -> Option<&crate::judgment::JudgmentHook> {
+        self.judgment_hook
+            .get_or_init(crate::agent::judgment_config::resolve_judgment_hook)
+            .as_ref()
+    }
+
+    /// Subsystem 5: prune the contiguous trailing turns after an explicit revert.
+    ///
+    /// Triggered only by a shell command that reverts the working tree, and only when Jev confirms
+    /// the reverted hypothesis is a dead end. The prune is strictly the contiguous tail: everything
+    /// before the last [`crate::judgment::DEAD_END_TURNS`] turns is left byte-identical, which is
+    /// what keeps the prompt-cache prefix valid.
+    ///
+    /// Fails closed at every step. A missing hook, a non-revert command, a Jev outage, or a
+    /// conversation with no retained prefix all leave the history untouched.
+    pub(crate) async fn maybe_prune_dead_end_tail(
+        &self,
+        output: &xai_grok_tools::types::output::ToolOutput,
+    ) {
+        let Some(hook) = self.judgment_hook() else {
+            return;
+        };
+        if !hook.prune_dead_ends_enabled() {
+            return;
+        }
+        let xai_grok_tools::types::output::ToolOutput::Bash(bash) = output else {
+            return;
+        };
+        if !crate::judgment::is_revert_command(&bash.command) {
+            return;
+        }
+
+        let conversation = self.chat_state_handle.get_conversation().await;
+        let is_turn_start = Self::conversation_turn_starts(&conversation);
+        let Some(plan) = crate::judgment::plan_dead_end_prune(&is_turn_start) else {
+            tracing::debug!(
+                "judgment: revert detected but no contiguous tail is prunable; history kept"
+            );
+            return;
+        };
+
+        let summary = self.dead_end_summary(&conversation, plan.remove_items);
+        if !hook.evaluator().verify_dead_end(&summary).await {
+            return;
+        }
+
+        // Re-read and re-plan: the verdict took up to the Jev timeout, and the conversation
+        // may have moved. A stale `remove_items` counted from the new end would drop the
+        // wrong tail.
+        let mut kept = self.chat_state_handle.get_conversation().await;
+        let fresh_plan =
+            crate::judgment::plan_dead_end_prune(&Self::conversation_turn_starts(&kept));
+        let Some(remove_items) = crate::judgment::confirm_dead_end_prune(
+            conversation.len(),
+            plan.remove_items,
+            kept.len(),
+            fresh_plan,
+        ) else {
+            tracing::debug!("judgment: conversation changed during dead-end verdict; history kept");
+            return;
+        };
+        kept.truncate(kept.len() - remove_items);
+        kept.push(
+            xai_grok_sampling_types::conversation::ConversationItem::system_reminder(
+                crate::judgment::dead_end_checkpoint_note(crate::judgment::DEAD_END_TURNS),
+            ),
+        );
+        self.chat_state_handle.replace_conversation(kept);
+        tracing::info!(
+            pruned_items = remove_items,
+            "judgment: pruned a reverted dead-end tail"
+        );
+    }
+
+    /// A prompt turn begins at a user item; `prompt_index` is set on the same items.
+    fn conversation_turn_starts(
+        conversation: &[xai_grok_sampling_types::conversation::ConversationItem],
+    ) -> Vec<bool> {
+        conversation
+            .iter()
+            .map(|item| {
+                matches!(
+                    item,
+                    xai_grok_sampling_types::conversation::ConversationItem::User(user)
+                        if user.prompt_index.is_some()
+                )
+            })
+            .collect()
+    }
+
+    /// Summarize the trailing turns a candidate prune would remove, for the dead-end verdict.
+    fn dead_end_summary(
+        &self,
+        conversation: &[xai_grok_sampling_types::conversation::ConversationItem],
+        remove_items: usize,
+    ) -> String {
+        let start = conversation.len().saturating_sub(remove_items);
+        conversation
+            .get(start..)
+            .unwrap_or_default()
+            .iter()
+            .map(|item| item.text_content())
+            .filter(|text| !text.trim().is_empty())
+            .collect::<Vec<String>>()
+            .join("\n")
+    }
+
+    /// Subsystem 4: replace a long, error-free tool output with its head and tail.
+    ///
+    /// Applies only to shell output over `distill_line_threshold` lines whose text carries no
+    /// actionable errors. Anything else — a short output, a failing command, a Jev outage — keeps
+    /// the full text, because distilling is the one action here that can lose information.
+    pub(crate) async fn distill_tool_output(
+        &self,
+        output: &xai_grok_tools::types::output::ToolOutput,
+    ) -> Option<String> {
+        let hook = self.judgment_hook()?;
+        if !hook.distill_outputs_enabled() {
+            return None;
+        }
+        // Only shell output is distilled: it is the noisy, high-volume case, and its exit status is
+        // a stronger signal than any classifier verdict.
+        let xai_grok_tools::types::output::ToolOutput::Bash(bash) = output else {
+            return None;
+        };
+        if bash.exit_code != 0 {
+            return None;
+        }
+        let text = &bash.output_for_prompt;
+        if crate::judgment::count_lines(text) <= hook.distill_line_threshold() {
+            return None;
+        }
+        if hook.evaluator().has_actionable_errors(text).await {
+            return None;
+        }
+        crate::judgment::distill_output(text, hook.distill_line_threshold())
+            .map(|distilled| distilled.text)
     }
 
     /// Fold an auth remedy into a turn failure: its advice becomes the tail of the message.

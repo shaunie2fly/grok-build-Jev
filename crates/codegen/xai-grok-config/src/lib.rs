@@ -21,6 +21,7 @@ mod display_refresh;
 mod env_overlay;
 pub mod fs_atomic;
 pub mod global_hook_sources;
+pub mod judgment;
 mod loader;
 mod macos_managed;
 mod managed_cache;
@@ -56,6 +57,7 @@ pub use env_overlay::{
 pub use global_hook_sources::{
     validate_direct_hook_json_file, validated_hook_json_files_for_sources,
 };
+pub use judgment::JudgmentConfig;
 pub use loader::{
     HookConfigLayer, HookProvenance, MANAGED_CONFIG_FILENAME, ManagedConfigLayer,
     REQUIREMENTS_FILENAME, SANDBOX_CONFIG_FILENAME, TRUSTED_FOLDERS_FILENAME,

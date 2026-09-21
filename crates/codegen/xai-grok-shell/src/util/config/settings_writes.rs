@@ -448,3 +448,36 @@ pub async fn set_show_tips(value: bool) -> Result<()> {
 pub async fn set_auto_update(value: bool) -> Result<()> {
     update_config(|cfg| cfg.cli.auto_update = Some(value)).await
 }
+
+/// Create the `[judgment]` table if the user has none.
+/// `get_or_insert_with` is what makes a modal toggle able to opt a user in: without it, a
+/// `[judgment]`-less config would take the assignment and `save_config_locked` would drop it.
+/// Only the toggled field is ever set here, so `api_key`, `endpoint`, and `timeout_ms` are
+/// preserved by the deep merge.
+fn judgment_mut(
+    cfg: &mut crate::util::config::mcp::Config,
+) -> &mut xai_grok_config::JudgmentConfig {
+    cfg.judgment.get_or_insert_with(Default::default)
+}
+
+/// Persist `[judgment].enabled`, the master switch for every Jev-backed optimization.
+/// Restart-required: the session resolves its judgment hook once at first use.
+pub async fn set_judgment_enabled(value: bool) -> Result<()> {
+    update_config(|cfg| judgment_mut(cfg).enabled = value).await
+}
+
+/// Persist `[judgment].gate_tools`, the pre-execution safety gate.
+pub async fn set_judgment_safety_gate_enabled(value: bool) -> Result<()> {
+    update_config(|cfg| judgment_mut(cfg).gate_tools = value).await
+}
+
+/// Persist `[judgment].dynamic_thinking`, the dynamic parent reasoning effort.
+pub async fn set_judgment_dynamic_reasoning_enabled(value: bool) -> Result<()> {
+    update_config(|cfg| judgment_mut(cfg).dynamic_thinking = value).await
+}
+
+/// Persist `[judgment].distill_outputs`, the tool-output distillation lever.
+/// Note: this is the spec's `distill_outputs`; `distill_line_threshold` stays as configured.
+pub async fn set_judgment_distillation_enabled(value: bool) -> Result<()> {
+    update_config(|cfg| judgment_mut(cfg).distill_outputs = value).await
+}

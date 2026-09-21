@@ -122,6 +122,7 @@ async fn persist_ack_waits_for_disk_flush_before_success() {
                 delivery_tools: std::cell::RefCell::new(Vec::new()),
                 attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
                 chat_state_handle,
+                judgment_hook: std::sync::OnceLock::new(),
                 unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
                 current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 active_work: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -662,6 +663,7 @@ async fn first_turn_memory_injection_disabled_does_not_persist_to_chat_history()
                 delivery_tools: std::cell::RefCell::new(Vec::new()),
                 attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
                 chat_state_handle,
+                judgment_hook: std::sync::OnceLock::new(),
                 unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
                 current_prompt_id: std::sync::Arc::new(std::sync::Mutex::new(None)),
                 active_work: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
@@ -992,6 +994,7 @@ async fn cancel_running_task_teardown_clears_running_and_pending_work() {
                 delivery_tools: std::cell::RefCell::new(Vec::new()),
                 attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
                 chat_state_handle: xai_chat_state::ChatStateHandle::noop(),
+                judgment_hook: std::sync::OnceLock::new(),
                 unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
                 current_prompt_id: std::sync::Arc::new(
                     std::sync::Mutex::new(Some("running".to_string())),
@@ -2558,6 +2561,7 @@ async fn cancel_propagates_to_sampler_handle_so_no_further_emission() {
                 delivery_tools: std::cell::RefCell::new(Vec::new()),
                 attach_non_interactive: std::rc::Rc::new(std::cell::Cell::new(false)),
                 chat_state_handle: xai_chat_state::ChatStateHandle::noop(),
+                judgment_hook: std::sync::OnceLock::new(),
                 unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
                 current_prompt_id: std::sync::Arc::new(
                     std::sync::Mutex::new(Some("running".to_string())),

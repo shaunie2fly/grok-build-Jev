@@ -1761,3 +1761,133 @@ async fn cancelled_blocking_save_holds_write_guard_until_worker_finishes() {
         "second writer acquired locks before the detached save released them"
     );
 }
+
+/// `[judgment]` round-trips through load → mutate → `merge_section`, mirroring what the Settings
+/// modal's `set_judgment_*` helpers do via `update_config`.
+#[test]
+fn judgment_section_round_trips_and_toggles_only_the_targeted_field() {
+    let original = r#"
+[judgment]
+enabled = false
+api_key = "env:TYPESAFE_API_KEY"
+endpoint = "https://api.typesafe.ai/v1/systemone"
+timeout_ms = 250
+gate_tools = false
+"#;
+    let root: TomlValue = toml::from_str(original).unwrap();
+    let mut cfg = load_config_from_toml(&root);
+    let loaded = cfg.judgment.as_ref().expect("the section must load");
+    assert!(!loaded.enabled);
+    assert_eq!(loaded.timeout_ms, 250);
+    assert!(!loaded.gate_tools);
+
+    // What `set_judgment_enabled(true)` does.
+    cfg.judgment.as_mut().unwrap().enabled = true;
+
+    let mut table = root.as_table().unwrap().clone();
+    merge_section(&mut table, "judgment", cfg.judgment.as_ref().unwrap());
+    let judgment = table.get("judgment").unwrap().as_table().unwrap();
+    assert_eq!(
+        judgment.get("enabled").and_then(|v| v.as_bool()),
+        Some(true)
+    );
+    // Untouched fields survive the deep merge.
+    assert_eq!(
+        judgment.get("api_key").and_then(|v| v.as_str()),
+        Some("env:TYPESAFE_API_KEY")
+    );
+    assert_eq!(
+        judgment.get("timeout_ms").and_then(toml::Value::as_integer),
+        Some(250)
+    );
+    assert_eq!(
+        judgment.get("gate_tools").and_then(|v| v.as_bool()),
+        Some(false)
+    );
+
+    // And the merged document reloads to the same typed config.
+    let reparsed = load_config_from_toml(&TomlValue::Table(table));
+    let reparsed = reparsed.judgment.expect("still present");
+    assert!(reparsed.enabled);
+    assert_eq!(reparsed.timeout_ms, 250);
+    assert_eq!(reparsed.api_key.as_deref(), Some("env:TYPESAFE_API_KEY"));
+}
+
+/// The zero-regression invariant for the modal: a save must never invent a `[judgment]` table.
+/// Without this, merely toggling an unrelated setting would opt the user into judgment.
+#[test]
+fn a_config_without_judgment_never_gains_the_section() {
+    let original = "[cli]\nauto_update = true\n";
+    let root: TomlValue = toml::from_str(original).unwrap();
+    let cfg = load_config_from_toml(&root);
+    assert!(
+        cfg.judgment.is_none(),
+        "an absent `[judgment]` table must load as None"
+    );
+
+    // Mirror `save_config_locked`'s guard.
+    let mut table = root.as_table().unwrap().clone();
+    if let Some(judgment) = &cfg.judgment {
+        merge_section(&mut table, "judgment", judgment);
+    }
+    assert!(
+        table.get("judgment").is_none(),
+        "saving must not create a `[judgment]` section the user never had"
+    );
+}
+
+/// A malformed `[judgment]` loads as `None` rather than failing the whole settings load.
+/// The runtime resolver behaves the same way, so a typo cannot take the session down.
+#[test]
+fn a_malformed_judgment_section_loads_as_none() {
+    let root: TomlValue = toml::from_str("[judgment]\nenabled = \"not a bool\"\n").unwrap();
+    let cfg = load_config_from_toml(&root);
+    assert!(
+        cfg.judgment.is_none(),
+        "a wrong-typed key must degrade to no-judgment, not abort the config load"
+    );
+}
+
+/// An enabled `[judgment]` with every lever on loads with the spec's defaults for unset keys.
+#[test]
+fn a_partial_judgment_section_fills_defaults() {
+    let root: TomlValue =
+        toml::from_str("[judgment]\nenabled = true\ngate_tools = true\n").unwrap();
+    let cfg = load_config_from_toml(&root);
+    let judgment = cfg.judgment.expect("present");
+    assert!(judgment.enabled);
+    assert!(judgment.gate_tools);
+    assert!(
+        judgment.distill_outputs,
+        "unset UI lever defaults on so enabling the master switch distills"
+    );
+    assert!(judgment.dynamic_thinking);
+    assert_eq!(judgment.timeout_ms, 400);
+    assert_eq!(judgment.endpoint, "https://api.typesafe.ai/v1/systemone");
+    assert_eq!(judgment.distill_line_threshold, 40);
+}
+
+/// Enabling the master switch on a config that never had `[judgment]` must seed the UI levers
+/// ON. Without this, `judgment_mut` inserts `Default` and a false-default bool would pin the
+/// levers off — the modal would show ON (`unwrap_or(true)`) while the runtime did nothing.
+#[test]
+fn enabling_judgment_on_an_absent_section_seeds_the_ui_levers_on() {
+    let root: TomlValue = toml::from_str("[cli]\nauto_update = true\n").unwrap();
+    let mut cfg = load_config_from_toml(&root);
+    assert!(cfg.judgment.is_none());
+
+    // What `set_judgment_enabled(true)` does via `judgment_mut`.
+    cfg.judgment.get_or_insert_with(Default::default).enabled = true;
+
+    let mut table = root.as_table().unwrap().clone();
+    merge_section(&mut table, "judgment", cfg.judgment.as_ref().unwrap());
+    let reparsed = load_config_from_toml(&TomlValue::Table(table));
+    let judgment = reparsed
+        .judgment
+        .expect("enabling the master switch must create the section");
+    assert!(judgment.enabled);
+    assert!(
+        judgment.dynamic_thinking && judgment.distill_outputs && judgment.gate_tools,
+        "master-enable must not pin UI levers off"
+    );
+}

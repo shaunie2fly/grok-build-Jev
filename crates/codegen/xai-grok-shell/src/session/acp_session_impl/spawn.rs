@@ -1789,6 +1789,7 @@ pub(crate) async fn spawn_session_actor(
         mcp_strategy: std::cell::Cell::new(mcp_strategy),
         initial_client_mcp_servers: initial_client_mcp_servers.clone(),
         chat_state_handle,
+        judgment_hook: std::sync::OnceLock::new(),
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
         current_prompt_id: current_prompt_id.clone(),
         active_work: active_work.clone(),

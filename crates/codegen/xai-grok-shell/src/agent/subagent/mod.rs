@@ -190,6 +190,10 @@ pub(crate) struct SubagentSpawnContext {
     /// Filled by the coordinator after the context is built (an async snapshot from the parent session actor).
     pub client_hooks: crate::extensions::hooks::ClientHooks,
     pub sampling_config: xai_grok_sampler::SamplerConfig,
+    /// Overlay-free `[judgment]` hook from the same disk loader the parent session uses.
+    /// Not the parent `OnceLock`: `GROK_CONFIG` overlay must not spend a TypeSafe credential.
+    /// `None` when judgment is off or unconfigured.
+    pub judgment_hook: Option<std::sync::Arc<crate::judgment::JudgmentHook>>,
     #[cfg(test)]
     pub setup_failure: Option<SubagentSetupFailure>,
     #[cfg(test)]
@@ -662,16 +666,73 @@ async fn resolve_effective_model_config(
     definition_model: &xai_grok_agent::config::ModelOverride,
     ctx: &SubagentSpawnContext,
 ) -> (xai_grok_sampler::SamplerConfig, acp::ModelId) {
-    if let Some(model_id) = runtime_override_model {
+    let (config, model_id) = if let Some(model_id) = runtime_override_model {
         if let Some(resolved) = resolve_model_override_to_config(model_id, ctx) {
-            return resolved;
+            resolved
+        } else {
+            tracing::warn!(
+                model_id,
+                "Runtime model override references unknown model, falling through"
+            );
+            resolve_subagent_sampling_config(subagent_type, definition_model, ctx).await
         }
-        tracing::warn!(
-            model_id,
-            "Runtime model override references unknown model, falling through"
-        );
+    } else {
+        resolve_subagent_sampling_config(subagent_type, definition_model, ctx).await
+    };
+    (config, model_id)
+}
+
+/// Subsystem 2: let Jev pick the child's reasoning effort from the task description.
+///
+/// Called after model fallback / resume pin and after an explicit spawn `reasoning_effort` has
+/// already been applied. An explicit override skips the TypeSafe call entirely. Empty task text
+/// leaves the inherited effort. `explore` subagents pin the cheapest offered thinking level
+/// without a network call. Every
+/// other failure path (no hook, lever off, timeout, error, unusable verdict, model that does not
+/// support reasoning effort) leaves the inherited parent effort untouched.
+async fn apply_dynamic_subagent_effort(
+    config: &mut xai_grok_sampler::SamplerConfig,
+    subagent_type: &str,
+    task_prompt: &str,
+    ctx: &SubagentSpawnContext,
+    explicit_reasoning_effort: Option<&str>,
+    session_id: &acp::SessionId,
+) {
+    if explicit_reasoning_effort.is_some() {
+        return;
     }
-    resolve_subagent_sampling_config(subagent_type, definition_model, ctx).await
+    if task_prompt.trim().is_empty() {
+        return;
+    }
+    let Some(hook) = ctx.judgment_hook.as_deref() else {
+        return;
+    };
+    if !hook.dynamic_subagent_thinking_enabled() {
+        return;
+    }
+    let offered = ctx
+        .models_manager
+        .offered_reasoning_effort_values(&config.model);
+    let Some(effort) = hook
+        .evaluator()
+        .classify_reasoning(task_prompt, Some(subagent_type), &offered)
+        .await
+    else {
+        return;
+    };
+    match effort.parse::<xai_grok_sampling_types::ReasoningEffort>() {
+        Ok(parsed) => ctx.models_manager.apply_supported_effort(
+            config,
+            Some(parsed),
+            session_id,
+            crate::sampling::EffortTarget::NewSession,
+        ),
+        Err(e) => tracing::warn!(
+            %effort,
+            error = %e,
+            "Jev returned an unusable subagent reasoning effort; keeping the inherited effort"
+        ),
+    }
 }
 /// Truncate an API key to a safe prefix for logging.
 /// Counts characters, not bytes: a configured key with a multi-byte character would panic a byte slice, and this only ever runs to build a log line.
