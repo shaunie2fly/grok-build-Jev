@@ -16,6 +16,11 @@ commands, searches the web, and manages long-running tasks — interactively,
 headlessly for scripting/CI, or embedded in editors via the Agent Client
 Protocol (ACP).
 
+This fork integrates **TypeSafe Jev** as a fast System 1 micro-decision layer,
+providing intelligent token optimization, dynamic reasoning allocation, and
+silent tool safety gating.
+
+[TypeSafe Jev Judgment](#typesafe-jev-judgment-system-1) ·
 [Installing the released binary](#installing-the-released-binary) ·
 [Building from source](#building-from-source) ·
 [Documentation](#documentation) ·
@@ -26,7 +31,7 @@ Protocol (ACP).
 
 ![Grok Build TUI](https://media.x.ai/v1/website/universe-tui-screenshot-6f7a0837.png)
 
-**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli)**
+**Learn more about Grok Build at [x.ai/cli](https://x.ai/cli) and TypeSafe Jev at [typesafe.ai](https://typesafe.ai)**
 
 This repository contains the Rust source for the `grok` CLI/TUI and its agent
 runtime. It is synced periodically from the SpaceXAI monorepo.
@@ -35,6 +40,47 @@ A small `SOURCE_REV` file at the root records the full monorepo commit SHA
 for the version of the code present in this tree.
 
 </div>
+
+---
+
+## TypeSafe Jev Judgment (System 1)
+
+This repository fork integrates **[TypeSafe Jev](https://typesafe.ai)** (`jev-latest` via `/v1/systemone`) as a fast, non-generative **System 1** micro-decision layer paired with frontier models like **Grok 4.6**.
+
+Autonomous coding agents frequently burn excessive tokens and stall developer momentum on micro-decisions that do not require frontier intelligence. By delegating these decisions to Jev, Grok Build preserves reasoning tokens and prompt-cache lifetime for actual code generation.
+
+### The 5 Subsystems
+
+1. **Dynamic Reasoning Effort Allocation:** Classifies prompt complexity in ~200ms and dynamically sets thinking effort (`low`, `medium`, `high`, `xhigh`) per turn, saving tens of thousands of unnecessary thinking tokens on simple edits.
+2. **Context Output Distillation:** Automatically compresses clean, repetitive 200–500+ line compiler and test logs (`cargo test`, `pytest`) into concise excerpts while preserving full stack traces whenever actionable errors occur.
+3. **Non-Destructive Tool Safety Gating:** Silently auto-approves safe read-only inspection commands (`ls`, `git diff`, `git status`, `cargo check`), eliminating approval fatigue while keeping destructive commands strictly gated for manual confirmation.
+4. **Dead-End Hypothesis Pruning:** Detects reverted debugging spikes at the conversation tail and prunes them with a synthetic checkpoint without invalidating provider prefix prompt-caching.
+5. **Tournament Patch Quality Scoring:** Evaluates and scores competing git diffs against task requirements in speculative multi-branch workflows.
+
+### Real-World Benefits
+
+- **60%–70% cost reduction** across standard 20-turn sessions.
+- **Zero approval friction** on read-only exploration and inspection steps.
+- **Sub-300ms latency overhead** with fail-safe fallbacks (fail-open for distillation, fail-closed for safety).
+
+### Quick Setup
+
+1. Export your API key in your environment or add it to `~/.grok/config.toml`:
+   ```bash
+   export TYPESAFE_API_KEY="apikey_your_actual_key_here"
+   ```
+2. Enable Judgment via the interactive Settings Modal (**`F2`** or **`Ctrl+,`** $\rightarrow$ **Agent** $\rightarrow$ **TypeSafe Jev judgment**), or configure `~/.grok/config.toml`:
+   ```toml
+   [judgment]
+   enabled = true
+   api_key = "env:TYPESAFE_API_KEY"
+   dynamic_thinking = true
+   distill_outputs = true
+   gate_tools = true
+   ```
+3. Restart `grok-build` to initialize the active hook.
+
+📖 **For detailed architecture, economics, and configuration instructions, see the [Full Judgment Feature Guide](docs/judgment_feature_guide.md).**
 
 ---
 
