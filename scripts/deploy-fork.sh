@@ -12,7 +12,8 @@
 #   scripts/deploy-fork.sh --rollback      # repoint to the previous fork binary
 #   scripts/deploy-fork.sh -j 16           # override build parallelism
 #
-# Env overrides: JOBS, FORK_KEEP (old fork binaries to retain, default 3), GROK_HOME.
+# Env overrides: JOBS, FORK_KEEP (old fork binaries to retain, default 3), GROK_HOME,
+# FORK_TAG (version suffix, default "jev"), GROK_VERSION (full version override).
 
 set -euo pipefail
 
@@ -23,6 +24,17 @@ CONFIG="$GROK_HOME_DIR/config.toml"
 STATE="$BIN_DIR/.fork-install-state"
 ARTIFACT="$REPO_ROOT/target/release/xai-grok-pager"
 KEEP="${FORK_KEEP:-3}"
+MANIFEST="$REPO_ROOT/crates/codegen/xai-grok-pager-bin/Cargo.toml"
+
+# Version suffix identifying this fork. `xai-grok-version/build.rs` and the pager-bin
+# build.rs both declare `rerun-if-env-changed=GROK_VERSION`, so setting it restamps the
+# embedded version. Without it, builds fall back to plain CARGO_PKG_VERSION and are
+# indistinguishable from upstream.
+# The suffix is also sent as `x-grok-client-version` (proxy version gate) and in the MCP
+# user-agent. That gate parses the header as semver and requires >= 0.1.202; a pre-release
+# suffix on a 1.0.x base passes, confirmed by direct probe (1.0.38-jev -> 402 billing,
+# 0.0.1-garbage -> 426 outdated).
+FORK_TAG="${FORK_TAG:-jev}"
 
 JOBS="${JOBS:-}"
 DO_BUILD=1
@@ -56,10 +68,18 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-read_state() {
+# Read one field from the state file.
+# Deliberately does NOT `source` the file: sourcing assigns every key in scope, so a caller
+# holding a local named `version`/`commit` would have it silently overwritten by the previous
+# install's value.
+state_get() {
   [ -f "$STATE" ] || return 0
-  # shellcheck disable=SC1090
-  . "$STATE"
+  sed -nE "s/^$1=(.*)$/\1/p" "$STATE" | head -1
+}
+
+read_state() {
+  current="$(state_get current)"
+  previous="$(state_get previous)"
 }
 
 # Atomic symlink swap: build the new link beside the target, then rename over it.
@@ -135,6 +155,16 @@ resolve_jobs() {
 build() {
   command -v cargo >/dev/null || die "cargo not found on PATH"
   local jobs; jobs="$(resolve_jobs)"
+
+  # Stamp the fork tag into the embedded version. Both build scripts that consume
+  # GROK_VERSION declare `rerun-if-env-changed`, so passing it here restamps
+  # xai-grok-version::VERSION and pager-bin's VERSION_WITH_COMMIT.
+  local base
+  base="$(sed -nE 's/^version = "([^"]+)".*/\1/p' "$MANIFEST" | head -1)"
+  [ -n "$base" ] || die "no version found in $MANIFEST"
+  export GROK_VERSION="${GROK_VERSION:-${base}-${FORK_TAG}}"
+  log "Stamping version $GROK_VERSION"
+
   log "Building fork release (jobs=$jobs, ~40 min cold, minutes warm)"
   if [ "$DO_PULL" -eq 1 ]; then
     git -C "$REPO_ROOT" diff --quiet || die "--pull refused: working tree has uncommitted changes"
@@ -159,46 +189,71 @@ probe_artifact() {
   printf '%s %s\n' "$version" "${sha:0:7}"
 }
 
-verify() {
-  local name="$1"
-  local failed=0
-
-  log "Verifying $name"
-
-  [ -x "$BIN_DIR/$name" ] || { warn "not executable: $BIN_DIR/$name"; failed=1; }
+# Content checks on a single binary.
+# `require_tag` (1/0): a FRESH build must carry the fork tag; a rollback target legitimately
+# may not (it predates the tag), so there the tag is only reported, never fatal.
+# `failed` accumulates across calls.
+verify_binary() {
+  local path="$1" label="$2" require_tag="${3:-1}" failed=0
 
   # Static link check: a build against a missing lib would otherwise fail at first launch.
   # Capture ldd output first; `ldd | grep -q` is unsafe under `set -o pipefail` (SIGPIPE).
   local ldd_out
-  ldd_out="$(ldd "$BIN_DIR/$name" 2>/dev/null || true)"
+  ldd_out="$(ldd "$path" 2>/dev/null || true)"
   if printf '%s\n' "$ldd_out" | grep -q 'not found'; then
-    warn "missing shared libraries:"; printf '%s\n' "$ldd_out" | grep 'not found' | sed 's/^/     /' >&2; failed=1
+    warn "$label: missing shared libraries:"; printf '%s\n' "$ldd_out" | grep 'not found' | sed 's/^/     /' >&2; failed=1
   else
-    ok "shared libraries resolve"
+    ok "$label: shared libraries resolve"
   fi
 
   # Fork identity: these strings only exist when the judgment layer is compiled in.
   # Dump strings ONCE (a 230 MB binary costs ~13 s per call) inside a subshell whose EXIT
-  # trap cleans the temp file. A `RETURN` trap here would leak out of `verify` and re-fire
-  # in the caller, where `dump` is unset and `set -u` aborts the script.
+  # trap cleans the temp file. A `RETURN` trap here would leak out of this function and re-fire
+  # in the caller, where the local is unset and `set -u` aborts the script.
   # `strings | grep -q` is not used: under `set -o pipefail`, grep -q closing the pipe early
   # makes strings die with SIGPIPE (141), failing the pipeline even on a hit.
-  local bin="$BIN_DIR/$name" missing
+  local missing
   missing="$(
     d="$(mktemp)"; trap 'rm -f "$d"' EXIT
-    strings -a "$bin" > "$d" 2>/dev/null || true
+    strings -a "$path" > "$d" 2>/dev/null || true
     for m in "${FORK_MARKERS[@]}"; do
       grep -qF -- "$m" "$d" || printf '%s ' "$m"
     done
   )"
   if [ -z "$missing" ]; then
-    ok "fork markers present (${FORK_MARKERS[*]})"
+    ok "$label: fork markers present"
   else
-    warn "fork markers ABSENT: $missing — this does not look like the fork build"; failed=1
+    warn "$label: fork markers ABSENT: $missing — not a fork build"; failed=1
   fi
 
-  local v; v="$(timeout 180 "$BIN_DIR/$name" --version 2>&1)" || { warn "--version failed"; failed=1; }
-  [ -n "${v:-}" ] && ok "reports: $v"
+  # The fork tag is only present when GROK_VERSION was set at build time. Its absence means the
+  # binary is indistinguishable from an unstamped upstream build, so fail loudly rather than
+  # install something that silently claims to be stock grok.
+  local v
+  if v="$(timeout 180 "$path" --version 2>&1)"; then
+    ok "$label: reports $v"
+    if printf '%s' "$v" | grep -q -- "-${FORK_TAG}"; then
+      ok "$label: version carries '-${FORK_TAG}'"
+    elif [ "$require_tag" -eq 1 ]; then
+      warn "$label: version '$v' lacks '-${FORK_TAG}' (built without GROK_VERSION=<ver>-${FORK_TAG})"; failed=1
+    else
+      warn "$label: version '$v' predates the '-${FORK_TAG}' tag (expected for a rollback target)"
+    fi
+  else
+    warn "$label: --version failed"; failed=1
+  fi
+
+  return "$failed"
+}
+
+# Installation-state checks: the symlinks and PATH resolution that `verify_binary` cannot see.
+verify() {
+  local name="$1" require_tag="${2:-1}" failed=0
+
+  log "Verifying $name"
+  [ -x "$BIN_DIR/$name" ] || { warn "not executable: $BIN_DIR/$name"; failed=1; }
+
+  verify_binary "$BIN_DIR/$name" "$name" "$require_tag" || failed=1
 
   # Both entrypoints matter: `agent` drives stdio/ACP/editor integrations and does NOT
   # follow the `grok` symlink.
@@ -238,8 +293,15 @@ check_jev() {
 
 install() {
   local version="$1" sha="$2"
-  local name="grok-${version}-fork-${sha}"
+  # The version already carries the fork tag (e.g. 1.0.38-jev), so no `-fork-` marker.
+  local name="grok-${version}-${sha}"
   local prev; read_state; prev="${current:-}"
+
+  # Gate BEFORE touching anything: an untagged or broken artifact must never reach the
+  # symlink swap, or the host ends up running it while the script reports failure.
+  log "Pre-flight checks on the staged artifact"
+  verify_binary "$ARTIFACT" "artifact" \
+    || die "artifact failed pre-flight checks; nothing installed (host still on ${prev:-current})"
 
   mkdir -p "$BIN_DIR"
   if [ -f "$BIN_DIR/$name" ] && cmp -s "$ARTIFACT" "$BIN_DIR/$name"; then
@@ -287,7 +349,9 @@ install() {
 # Old fork binaries are ~230 MB each and live on the root filesystem.
 prune() {
   local all
-  mapfile -t all < <(find "$BIN_DIR" -maxdepth 1 -name 'grok-*-fork*' -type f -printf '%f\n' 2>/dev/null | sort -V)
+  # Match both naming generations: legacy `grok-1.0.38-fork-050d560` and the current
+  # `grok-1.0.38-jev-050d560` (fork tag now lives in the version string).
+  mapfile -t all < <(find "$BIN_DIR" -maxdepth 1 \( -name 'grok-*-fork*' -o -name "grok-*-${FORK_TAG}-*" \) -type f -printf '%f\n' 2>/dev/null | sort -uV)
   local n=${#all[@]}
   [ "$n" -le "$KEEP" ] && return 0
   local read_state_current; read_state; read_state_current="${current:-}"
@@ -302,11 +366,14 @@ prune() {
 
 status() {
   log "Fork install status"
-  read_state
-  printf '  current : %s\n' "${current:-<none>}"
-  printf '  previous: %s\n' "${previous:-<none>}"
-  printf '  commit  : %s\n' "${commit:-<unknown>}"
-  printf '  built_at: %s\n' "${built_at:-<unknown>}"
+  local cur prev ver com bui
+  cur="$(state_get current)"; prev="$(state_get previous)"
+  ver="$(state_get version)"; com="$(state_get commit)"; bui="$(state_get built_at)"
+  printf '  current : %s\n' "${cur:-<none>}"
+  printf '  previous: %s\n' "${prev:-<none>}"
+  printf '  version : %s\n' "${ver:-<unknown>}"
+  printf '  commit  : %s\n' "${com:-<unknown>}"
+  printf '  built_at: %s\n' "${bui:-<unknown>}"
   printf '  home    : %s\n' "$GROK_HOME_DIR"
   local tgt; tgt="$(readlink "$BIN_DIR/grok" 2>/dev/null || echo '<none>')"
   printf '  grok -> : %s\n' "$tgt"
@@ -316,7 +383,7 @@ status() {
   printf '  repo    : %s\n' "$(git -C "$REPO_ROOT" rev-parse --short HEAD 2>/dev/null || echo '<not a repo>')"
   echo
   log "Installed fork binaries (${KEEP} newest retained)"
-  find "$BIN_DIR" -maxdepth 1 -name 'grok-*-fork*' -type f -printf '  %f  %s bytes  %TY-%Tm-%Td %TH:%TM\n' 2>/dev/null | sort -V
+  find "$BIN_DIR" -maxdepth 1 \( -name 'grok-*-fork*' -o -name "grok-*-${FORK_TAG}-*" \) -type f -printf '  %f  %s bytes  %TY-%Tm-%Td %TH:%TM\n' 2>/dev/null | sort -uV
 }
 
 rollback() {
@@ -326,16 +393,20 @@ rollback() {
   [ -x "$BIN_DIR/$target" ] || die "rollback target missing: $BIN_DIR/$target"
   local current_before="${current:-}"
   log "Rolling back to $target"
+  # A rollback target may predate the fork tag, so the tag is reported but not required.
+  verify_binary "$BIN_DIR/$target" "$target" 0 || die "rollback target failed checks; symlinks untouched"
   atomic_symlink "$target" "$BIN_DIR/grok"
   atomic_symlink "$target" "$BIN_DIR/agent"
   {
     printf 'current=%s\n'  "$target"
     printf 'previous=%s\n' "$current_before"
-    printf 'version=%s\n'  "${target#grok-}"
+    # Report the target's real version rather than guessing from the filename, which carries
+    # a commit suffix (and on legacy names, a `-fork` marker).
+    printf 'version=%s\n'  "$(timeout 180 "$BIN_DIR/$target" --version 2>/dev/null | sed -nE 's/^grok ([^ ]+).*/\1/p' || true)"
     printf 'commit=%s\n'   ""
     printf 'built_at=%s\n' "$(date -Iseconds)"
   } > "$STATE.tmp.$$" && mv -f "$STATE.tmp.$$" "$STATE"
-  verify "$target"
+  verify "$target" 0
   ok "rolled back to $target"
 }
 
