@@ -51,24 +51,6 @@ fn polled_fields(settings: &crate::util::config::RemoteSettings) -> PolledFields
     (settings.announcements.clone(), settings.accept_request_encodings.clone())
 }
 impl MvpAgent {
-    /// Announce a session's new title over ACP.
-    /// ACP scopes `session/update` to sessions the client established, and a rename can name a history row it never loaded.
-    /// So the liveness check belongs here rather than at each call site.
-    pub(crate) fn notify_session_info_update(
-        &self,
-        session_id: &agent_client_protocol::SessionId,
-        title: &str,
-    ) {
-        if self.is_resident(session_id) {
-            self.gateway
-                .forward_fire_and_forget(
-                    crate::session::summary::session_info_update_manual(
-                        session_id.clone(),
-                        title,
-                    ),
-                );
-        }
-    }
     pub fn reload_skills_all_sessions(&self) -> usize {
         let session_ids = self.resident_ids();
         for sid in &session_ids {
@@ -4399,6 +4381,10 @@ impl MvpAgent {
             .cfg
             .borrow()
             .is_feature_enabled(crate::agent::config::Feature::CompactionVerbatimInput);
+        let long_reasoning_reminder = self
+            .cfg
+            .borrow()
+            .resolve_long_reasoning_reminder();
         let compaction_tool_choice = self.cfg.borrow().resolve_compaction_tool_choice();
         let auto_update = self.cfg.borrow().cli.auto_update;
         let client_type = *self.client_type.borrow();
@@ -4861,6 +4847,7 @@ impl MvpAgent {
                     system_prompt_label,
                     compaction_mode,
                     compaction_verbatim_input,
+                    long_reasoning_reminder,
                     compaction_tool_choice,
                     two_pass_enabled,
                     buffering_settings,

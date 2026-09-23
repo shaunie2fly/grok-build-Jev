@@ -91,6 +91,7 @@ val V1_COMMAND_ALLOWLIST: List<String> = listOf(
     "setAgentAvatarBytes",
     "setAgentHiddenFromSidebar",
     "setAgentNotificationsEnabled",
+    "setAgentNotifyOnUpdates",
     "setAgentUnread",
     "setBotTemplateVisibility",
     "setGroupMembers",
@@ -952,6 +953,17 @@ sealed interface BotCommand {
     }
 
     @Serializable
+    data class SetAgentNotifyOnUpdates(
+        val agentId: String,
+        @EncodeDefault override val name: String = NAME,
+        val args: ArgsSetAgentNotificationsEnabled,
+    ) : BotCommand {
+        companion object {
+            const val NAME = "setAgentNotifyOnUpdates"
+        }
+    }
+
+    @Serializable
     data class SetAgentUnread(
         val agentId: String,
         @EncodeDefault override val name: String = NAME,
@@ -1197,6 +1209,7 @@ object BotCommandSerializer :
             BotCommand.SetAgentAvatarBytes.NAME -> BotCommand.SetAgentAvatarBytes.serializer()
             BotCommand.SetAgentHiddenFromSidebar.NAME -> BotCommand.SetAgentHiddenFromSidebar.serializer()
             BotCommand.SetAgentNotificationsEnabled.NAME -> BotCommand.SetAgentNotificationsEnabled.serializer()
+            BotCommand.SetAgentNotifyOnUpdates.NAME -> BotCommand.SetAgentNotifyOnUpdates.serializer()
             BotCommand.SetAgentUnread.NAME -> BotCommand.SetAgentUnread.serializer()
             BotCommand.SetBotTemplateVisibility.NAME -> BotCommand.SetBotTemplateVisibility.serializer()
             BotCommand.SetGroupMembers.NAME -> BotCommand.SetGroupMembers.serializer()
@@ -1299,6 +1312,7 @@ typealias BotCommandReplySetAgentAutomationEnabled = List<SandAutomation>
 typealias BotCommandReplySetAgentAvatarBytes = SandAgentSummary?
 typealias BotCommandReplySetAgentHiddenFromSidebar = JsonElement
 typealias BotCommandReplySetAgentNotificationsEnabled = JsonElement
+typealias BotCommandReplySetAgentNotifyOnUpdates = JsonElement
 typealias BotCommandReplySetAgentUnread = JsonElement
 typealias BotCommandReplySetBotTemplateVisibility = SandBotTemplateView
 typealias BotCommandReplySetGroupMembers = SandAgentSummary?

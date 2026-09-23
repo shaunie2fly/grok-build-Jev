@@ -1,5 +1,59 @@
 # Changelog
 
+# 1.0.41 — 2026-09-22
+
+## Features
+
+- **Added a new `sports_search` tool** that can look up live NFL scores, standings, schedules, player stats, and team records directly from X data.
+- **Subagent model inheritance** setting added to /settings; persists in config.toml and respects managed/overlay layers.
+- **Per-model request size limits** can now be configured to match provider HTTP body caps and control inline image eviction.
+- **Long reasoning reminder** can now be enabled via config to nudge the model after long hidden-reasoning steps.
+
+## Bug Fixes
+
+- **Fixed** the subagent fullscreen view so it no longer shows a stray [Dashboard] button in the header.
+- **Fixed** agent frontmatter `mcpServers` so that headers and URLs from the active agent's agent.md now correctly override config.toml and survive config reloads or agent switches.
+- **Ctrl+P** now opens the command palette immediately from the welcome screen.
+- **Dashboard** now focuses the "+ New Agent" row instead of leaving the previous session selected.
+- Sessions that were interrupted by a crash now show a clear marker instead of silently dropping the turn.
+- **Ctrl+Z** right after stashing a prompt now restores it.
+- **Collapsed edit blocks** setting now correctly collapses edits even if `expanded_by_default` was pinned true.
+- Interjections now receive a visible reply before the agent resumes prior tasks.
+- Canceling a turn that blocked on spawn_subagent now tells the model the child moved to the background instead of claiming it was never executed.
+- Saving a queued-prompt edit now returns focus to the composer so the next keys type the next message.
+- Subagent activation is now consistent between the TUI and `grok agent stdio`; tables that only set limits or models no longer disable subagents.
+- **Effort level selection** now accepts menu labels in addition to IDs.
+
+
+# 1.0.40 — 2026-09-20
+
+## Bug Fixes
+
+- **Miscellaneous bug fixes and updates**.
+
+
+# 1.0.39 — 2026-09-20
+
+## Features
+
+- **Subagents** can always use the parent model, with that choice locked in when the session starts.
+- Earlier image attachments now survive multiple compactions via a persisted path list.
+- **Subagent spawning** no longer requires choosing a type; omitted calls default to general-purpose.
+- The agent now keeps helper scripts, logs, and PR drafts in the system temp directory instead of the repository.
+- read_file descriptions now tell the model when offset/limit are ignored for SKILL.md and instruction files.
+- Effort levels for models now come from the API instead of hard-coded lists, and config aliases inherit the menu.
+- MCP tools that receive the wrong JSON shape are now automatically fixed when the mismatch is unambiguous.
+
+## Bug Fixes
+
+- Local worktree capture no longer refuses repositories that contain uninitialized submodules.
+- **Memory captures** no longer include opaque model reasoning blobs.
+- Idle timeouts now show a clear message instead of raw internal text.
+- Images attached to the last user prompt now survive compaction.
+- **Custom agent profiles** now persist correctly across session resume and reload.
+- **Subagent labels** now appear as "Subagent" instead of "General" in transcripts and the tasks pane.
+
+
 # 1.0.38 — 2026-09-19
 
 ## Features

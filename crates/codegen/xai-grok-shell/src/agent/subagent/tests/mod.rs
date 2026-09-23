@@ -245,8 +245,8 @@ fn wedged_child_handle() -> (
             std::sync::atomic::AtomicBool::new(true),
         ),
         client_caps: crate::session::notifications::SessionClientCaps::new(false, true),
-        mcp_servers: vec![],
-        initial_client_mcp_servers: vec![],
+        mcp_servers: Default::default(),
+        initial_client_mcp_servers: Default::default(),
         display_cwd: None,
         feedback_manager: std::sync::Arc::new(
             crate::session::feedback_manager::FeedbackManager::local_only("test"),
@@ -747,6 +747,7 @@ fn auto_wake_test_request(id: &str) -> SubagentRequest {
         owner: SubagentOwner::Task,
         cancel_token: CancellationToken::new(),
         spawn_root: Default::default(),
+        tool_call_id: None,
     }
 }
 fn prompt_text(blocks: &[acp::ContentBlock]) -> String {
@@ -1650,6 +1651,7 @@ fn bootstrap_test_request(fork_context: bool) -> SubagentRequest {
         owner: SubagentOwner::Task,
         cancel_token: CancellationToken::new(),
         spawn_root: Default::default(),
+        tool_call_id: None,
     }
 }
 #[tokio::test]

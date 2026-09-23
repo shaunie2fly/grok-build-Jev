@@ -1219,8 +1219,8 @@ fn make_test_handle(
         gateway_enabled: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         emit_local_background_tasks: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true)),
         client_caps: crate::session::notifications::SessionClientCaps::new(false, true),
-        mcp_servers: vec![],
-        initial_client_mcp_servers: vec![],
+        mcp_servers: Default::default(),
+        initial_client_mcp_servers: Default::default(),
         display_cwd: None,
         feedback_manager: std::sync::Arc::new(
             crate::session::feedback_manager::FeedbackManager::local_only("test"),

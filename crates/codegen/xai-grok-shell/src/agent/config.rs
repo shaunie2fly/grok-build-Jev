@@ -97,7 +97,7 @@ impl EnvKeys {
     }
     /// Resolve the first set, non-blank process env value among configured names.
     pub(crate) fn resolve_value(&self) -> Option<String> {
-        self.resolve_value_with(|name| std::env::var(name).ok())
+        self.resolve_value_with(|name| xai_grok_login::auth_method::read_env_var(name).ok())
     }
     /// Testable resolve with an injected getenv.
     pub(crate) fn resolve_value_with(
@@ -520,8 +520,8 @@ impl Default for EndpointsConfig {
     }
 }
 pub use xai_grok_config_types::{
-    BoolFlag, ConfigSource, FEATURES, Feature, FeatureSources, LazinessDetectorPerModelConfig,
-    Resolved,
+    BoolFlag, ConfigSource, FEATURES, Feature, FeatureConfigLayer, FeatureConfigLayers,
+    FeatureLayerValue, FeatureSources, LazinessDetectorPerModelConfig, Resolved,
 };
 /// Resolution result for a `/goal` role's model selection.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -613,7 +613,8 @@ pub struct RuntimeResolutionContext<'a> {
     pub raw_config: &'a toml::Value,
     pub remote_settings: Option<&'a crate::util::config::RemoteSettings>,
     pub is_headless: bool,
-    /// `Some(true)` means the CLI explicitly enabled it; `None` defers to config/env/remote.
+    /// `Some(false)` means the CLI explicitly disabled it (`--no-subagents`), `Some(true)` explicitly enabled it; `None` defers to env/config/default.
+    /// Every entrypoint (TUI, `grok agent stdio`, headless) passes `None` unless a flag was given, so they resolve identically.
     pub cli_subagents: Option<bool>,
     pub cli_web_search_model: Option<&'a str>,
     pub cli_session_summary_model: Option<&'a str>,
@@ -1199,6 +1200,9 @@ pub struct Config {
     /// See [`crate::util::config::DoomLoopRecoverySettings`].
     #[serde(default)]
     pub doom_loop_recovery: crate::util::config::DoomLoopRecoverySettings,
+    /// One type serves this TOML table and the remote `long_reasoning_reminder` object.
+    #[serde(default)]
+    pub long_reasoning_reminder: crate::util::config::LongReasoningReminderSettings,
     /// `[worktree]` section (currently `[worktree.auto_gc]` only).
     #[serde(default)]
     pub worktree: WorktreeConfigSection,
@@ -1351,7 +1355,7 @@ pub struct Config {
     /// CLI memory override preserved across config and remote-setting refreshes.
     #[serde(skip)]
     pub memory_enabled_override: Option<bool>,
-    /// Original CLI `--subagents` tri-state, preserved for re-resolution when remote settings are refreshed on /new.
+    /// Original CLI subagents tri-state (`--no-subagents` is `Some(false)`), preserved for re-resolution when remote settings are refreshed on /new.
     #[serde(skip)]
     pub cli_subagents: Option<bool>,
     /// Resolved memory configuration, including the disabled state so mode is
@@ -1602,6 +1606,7 @@ impl Default for Config {
             goal: GoalConfig::default(),
             workflows: WorkflowsConfig::default(),
             doom_loop_recovery: crate::util::config::DoomLoopRecoverySettings::default(),
+            long_reasoning_reminder: crate::util::config::LongReasoningReminderSettings::default(),
             worktree: WorktreeConfigSection::default(),
             auto_mode: AutoModeConfig::default(),
             judgment: None,
@@ -2102,7 +2107,7 @@ impl Config {
     /// Populate trust-independent `#[serde(skip)]` subagent base fields.
     /// Must be called after `new_from_toml_cfg` on the **primary startup path** before the config is handed to `MvpAgent`.
     /// Project definitions are overlaid per cwd after that cwd's authoritative folder-trust resolve.
-    pub(crate) fn resolve_subagents(&mut self, cli_flag: bool, raw_config: &toml::Value) {
+    pub(crate) fn resolve_subagents(&mut self, cli_flag: Option<bool>, raw_config: &toml::Value) {
         let sa = crate::config::SubagentsConfig::resolve(cli_flag, raw_config);
         let remote_settings = self.remote_settings.clone();
         self.resolve_subagent_limits(&sa, remote_settings.as_ref());
@@ -2155,8 +2160,7 @@ impl Config {
         self.cli_subagents = ctx.cli_subagents;
         self.web_search_model_override = ctx.cli_web_search_model.map(|s| s.to_owned());
         self.session_summary_model_override = ctx.cli_session_summary_model.map(|s| s.to_owned());
-        let cli_flag = ctx.cli_subagents.unwrap_or(false);
-        self.resolve_subagents(cli_flag, ctx.raw_config);
+        self.resolve_subagents(ctx.cli_subagents, ctx.raw_config);
         let env = std::env::var(crate::config::SubagentsConfig::ENV_MAX_DEPTH).ok();
         let toml_max = ctx
             .raw_config
@@ -2485,6 +2489,16 @@ impl Config {
                     Policy::clamp_window_tokens,
                 ),
         })
+    }
+    pub(crate) fn resolve_long_reasoning_reminder(
+        &self,
+    ) -> crate::session::long_reasoning_reminder::LongReasoningReminder {
+        crate::session::long_reasoning_reminder::LongReasoningReminder::resolve(
+            &self.long_reasoning_reminder,
+            self.remote_settings
+                .as_ref()
+                .and_then(|s| s.long_reasoning_reminder.as_ref()),
+        )
     }
     /// Automatic worktree GC policy.
     /// Precedence: env kill/dry-run > `[worktree.auto_gc]` TOML > remote `worktree_auto_gc` > defaults.
@@ -3351,6 +3365,8 @@ pub(crate) fn resolve_model_list(
         resolved = prefetched;
     }
     let mut explicit_api_backend_keys = std::collections::HashSet::new();
+    let mut explicit_supports_effort_false_keys = std::collections::HashSet::new();
+    let mut explicit_menu_keys = std::collections::HashSet::new();
     for (key, model_override) in &cfg.config_models {
         let had_base = resolved.contains_key(key);
         let base = resolved.shift_remove(key);
@@ -3374,6 +3390,14 @@ pub(crate) fn resolve_model_list(
         let effective = with_provider.as_ref().unwrap_or(model_override);
         if effective.api_backend.is_some() {
             explicit_api_backend_keys.insert(key.as_str());
+        }
+        if effective.supports_reasoning_effort == Some(false)
+            && effective.reasoning_efforts.is_empty()
+        {
+            explicit_supports_effort_false_keys.insert(key.as_str());
+        }
+        if !effective.reasoning_efforts.is_empty() {
+            explicit_menu_keys.insert(key.as_str());
         }
         let mut entry = effective.apply(key, base, &cfg.endpoints);
         let session_bearer_unsafe = !crate::util::is_xai_api_bearer_url(&entry.info.base_url)
@@ -3430,6 +3454,26 @@ pub(crate) fn resolve_model_list(
                     )
                 })
                 .collect();
+        let mut menu_donors: std::collections::HashMap<String, (Vec<ReasoningEffortOption>, bool)> =
+            std::collections::HashMap::new();
+        for (key, e) in &resolved {
+            if e.info.reasoning_efforts.is_empty() {
+                continue;
+            }
+            let same_key = *key == e.info.model;
+            if same_key
+                || (!explicit_menu_keys.contains(key.as_str())
+                    && !menu_donors.contains_key(&e.info.model))
+            {
+                menu_donors.insert(
+                    e.info.model.clone(),
+                    (
+                        e.info.reasoning_efforts.clone(),
+                        e.info.reasoning_effort_server_default,
+                    ),
+                );
+            }
+        }
         for (key, entry) in resolved.iter_mut() {
             if let Some((donor_cw, donor_backend)) = donors.get(&entry.info.model) {
                 if entry.info.context_window.get() == default_cw {
@@ -3448,6 +3492,17 @@ pub(crate) fn resolve_model_list(
                     entry.info.api_backend.clone_from(donor_backend);
                 }
             }
+            if entry.info.reasoning_efforts.is_empty()
+                && let Some((menu, server_default)) = menu_donors.get(&entry.info.model)
+            {
+                tracing::debug!(
+                    model_key = %key,
+                    model = %entry.info.model,
+                    "slug-match: inheriting reasoning_efforts from sibling catalog entry"
+                );
+                entry.info.reasoning_efforts.clone_from(menu);
+                entry.info.reasoning_effort_server_default = *server_default;
+            }
         }
     }
     if let Some(ref global_agent_type) = cfg.models.agent_type {
@@ -3463,6 +3518,13 @@ pub(crate) fn resolve_model_list(
     }
     apply_global_extra_headers(&mut resolved, &cfg.models);
     apply_global_scalar_defaults(&mut resolved, &cfg.models);
+    for key in &explicit_supports_effort_false_keys {
+        if let Some(entry) = resolved.get_mut(*key) {
+            entry.info.reasoning_efforts.clear();
+            entry.info.reasoning_effort = None;
+            entry.info.reasoning_effort_server_default = false;
+        }
+    }
     for entry in resolved.values_mut() {
         entry.info.derive_reasoning_effort_fields();
     }
@@ -3638,6 +3700,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 name: m.name,
                 description: m.description,
                 context_window,
+                max_request_bytes: None,
                 auto_compact_threshold_percent: m.auto_compact_threshold_percent,
                 system_prompt_label: m.system_prompt_label,
                 temperature: m.temperature,
@@ -3659,6 +3722,7 @@ fn default_models(endpoints: &EndpointsConfig) -> IndexMap<String, ModelEntryCon
                 reasoning_effort: m.reasoning_effort,
                 supports_reasoning_effort: m.supports_reasoning_effort,
                 reasoning_efforts: m.reasoning_efforts,
+                reasoning_effort_server_default: false,
                 variants: m.variants,
                 supports_backend_search: m.supports_backend_search,
                 compactions_remaining: m.compactions_remaining,
@@ -3719,6 +3783,9 @@ pub struct ModelEntryConfig {
     /// The two legacy fields above are derived from this list when it is non-empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasoning_efforts: Vec<ReasoningEffortOption>,
+    /// True when the endpoint advertised the menu without naming a default; the request then omits the effort so the server applies its own.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reasoning_effort_server_default: bool,
     /// The id to send for each effort, empty unless the backend spells the effort into the model id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<ModelVariant>,
@@ -3731,6 +3798,9 @@ pub struct ModelEntryConfig {
     /// Used for auto-compact threshold calculations.
     /// Required: BYOK users must explicitly set this in config.toml.
     pub context_window: NonZeroU64,
+    /// Provider request-body cap in bytes; unset resolves to the `api_backend` default (30 MB for `messages`, else 50 MiB).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_request_bytes: Option<NonZeroU64>,
     /// Per-model auto-compact threshold (0-100). When the session's token usage exceeds this percentage of `context_window`, the conversation is summarized.
     /// Resolver precedence: requirements > env > user (per-model > global) > managed (per-model > global). Below those: remote per-model (this field) > remote global > 85.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3816,9 +3886,11 @@ impl Default for ModelEntryConfig {
             reasoning_effort: None,
             supports_reasoning_effort: false,
             reasoning_efforts: Vec::new(),
+            reasoning_effort_server_default: false,
             variants: Vec::new(),
             extra_headers: IndexMap::new(),
             context_window: NonZeroU64::MIN,
+            max_request_bytes: None,
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
             api_base_url: None,
@@ -3879,6 +3951,7 @@ pub struct ConfigModelOverride {
     #[serde(default)]
     pub env_http_headers: IndexMap<String, String>,
     pub context_window: Option<u64>,
+    pub max_request_bytes: Option<NonZeroU64>,
     /// Per-model auto-compact threshold override (0-100) from `[model.<id>]`.
     /// Read directly by `resolve_auto_compact_threshold_percent`.
     /// Intentionally NOT merged into `ModelInfo.auto_compact_threshold_percent` so the resolver can keep user-per-model distinct from GB-per-model.
@@ -3958,6 +4031,9 @@ impl ConfigModelOverride {
         if let Some(cw) = self.context_window.and_then(NonZeroU64::new) {
             entry.info.context_window = cw;
         }
+        if self.max_request_bytes.is_some() {
+            entry.info.max_request_bytes = self.max_request_bytes;
+        }
         if let Some(v) = self.use_concise {
             entry.info.use_concise = v;
         }
@@ -3994,6 +4070,7 @@ impl ConfigModelOverride {
         }
         if !self.reasoning_efforts.is_empty() {
             entry.info.reasoning_efforts = self.reasoning_efforts.clone();
+            entry.info.reasoning_effort_server_default = false;
         }
         if let Some(v) = self.supports_backend_search {
             entry.info.supports_backend_search = v;
@@ -4062,6 +4139,9 @@ pub struct ModelInfo {
     #[serde(default, skip_serializing_if = "IndexMap::is_empty")]
     pub env_http_headers: IndexMap<String, String>,
     pub context_window: NonZeroU64,
+    /// Explicit request-body cap only; `sampling_config_for_model` applies the `api_backend` default so the catalog never persists it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_request_bytes: Option<NonZeroU64>,
     /// Per-model auto-compact threshold (0-100).
     /// `None` defers to the global / default tiers in `resolve_auto_compact_threshold_percent`.
     pub auto_compact_threshold_percent: Option<u8>,
@@ -4095,6 +4175,9 @@ pub struct ModelInfo {
     /// Per-model reasoning-effort menu (source of truth); legacy fields derived from it.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub reasoning_efforts: Vec<ReasoningEffortOption>,
+    /// The menu came without a default; leave `reasoning_effort` unset so the request omits it and the server applies its own.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub reasoning_effort_server_default: bool,
     /// The id to send for each effort, empty unless the backend spells the effort into the model id.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub variants: Vec<ModelVariant>,
@@ -4143,6 +4226,7 @@ impl ModelInfo {
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
             context_window: NonZeroU64::new(200_000).unwrap(),
+            max_request_bytes: None,
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
             use_concise: false,
@@ -4156,6 +4240,7 @@ impl ModelInfo {
             reasoning_effort: None,
             supports_reasoning_effort: false,
             reasoning_efforts: Vec::new(),
+            reasoning_effort_server_default: false,
             variants: Vec::new(),
             supports_backend_search: false,
             compactions_remaining: None,
@@ -4184,6 +4269,7 @@ impl ModelInfo {
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
             context_window: entry.context_window,
+            max_request_bytes: entry.max_request_bytes,
             auto_compact_threshold_percent: entry.auto_compact_threshold_percent,
             system_prompt_label: entry.system_prompt_label.clone(),
             use_concise: entry.use_concise,
@@ -4197,6 +4283,7 @@ impl ModelInfo {
             reasoning_effort: entry.reasoning_effort,
             supports_reasoning_effort: entry.supports_reasoning_effort,
             reasoning_efforts: entry.reasoning_efforts.clone(),
+            reasoning_effort_server_default: entry.reasoning_effort_server_default,
             variants: entry.variants.clone(),
             supports_backend_search: entry.supports_backend_search,
             compactions_remaining: entry.compactions_remaining,
@@ -4240,13 +4327,17 @@ impl ModelInfo {
         }
         self.supports_reasoning_effort = true;
         if self.reasoning_effort.is_none() {
-            let default = self
+            let first = if self.reasoning_effort_server_default {
+                None
+            } else {
+                self.reasoning_efforts.first()
+            };
+            self.reasoning_effort = self
                 .reasoning_efforts
                 .iter()
                 .find(|opt| opt.default)
-                .or_else(|| self.reasoning_efforts.first())
+                .or(first)
                 .map(|opt| opt.value);
-            self.reasoning_effort = default;
         }
     }
     /// Whether this model appears in the picker for the given auth mode.
@@ -4885,6 +4976,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 query_params: IndexMap::new(),
                 env_http_headers: IndexMap::new(),
                 context_window: NonZeroU64::new(200_000).unwrap(),
+                max_request_bytes: None,
                 auto_compact_threshold_percent: None,
                 system_prompt_label: None,
                 use_concise: false,
@@ -4898,6 +4990,7 @@ pub(crate) fn resolve_aux_model_sampling_config(
                 reasoning_effort: None,
                 supports_reasoning_effort: false,
                 reasoning_efforts: Vec::new(),
+                reasoning_effort_server_default: false,
                 variants: Vec::new(),
                 supports_backend_search: false,
                 compactions_remaining: None,
@@ -5043,6 +5136,10 @@ pub(crate) fn sampling_config_for_model(
         query_params: info.query_params.clone(),
         env_http_headers: info.env_http_headers.clone(),
         context_window: info.context_window.get(),
+        max_request_bytes: Some(
+            info.max_request_bytes
+                .unwrap_or_else(|| info.api_backend.default_max_request_bytes()),
+        ),
         client_version,
         reasoning_effort: info.reasoning_effort,
         reasoning_summary: info.reasoning_summary,
@@ -5111,6 +5208,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             query_params: IndexMap::new(),
             env_http_headers: IndexMap::new(),
             context_window: NonZeroU64::new(200_000).unwrap(),
+            max_request_bytes: None,
             auto_compact_threshold_percent: None,
             system_prompt_label: None,
             use_concise: false,
@@ -5125,6 +5223,7 @@ fn resolve_hidden_default_web_search_sampling_config(
             reasoning_effort: None,
             supports_reasoning_effort: false,
             reasoning_efforts: Vec::new(),
+            reasoning_effort_server_default: false,
             variants: Vec::new(),
             supports_backend_search: false,
             compactions_remaining: None,

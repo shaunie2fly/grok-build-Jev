@@ -566,6 +566,10 @@ pub enum SessionCommand {
         next_trace_turn: u64,
         request_id: Option<String>,
     },
+    /// Tell the model, at its next prompt, that the turn a previous process was running never finished.
+    NoteInterruptedTurn {
+        turn: crate::session::interrupted_turn::InterruptedTurn,
+    },
     /// Flush pending writes and copy the current session directory contents to memory.
     /// The caller can then tar.gz and upload to GCS (or similar).
     CopyFile {
@@ -590,6 +594,9 @@ pub enum SessionCommand {
     /// The caller is notified via `respond_to` once MCP re-initialization completes (or immediately if configs are unchanged).
     UpdateMcpServers {
         mcp_servers: Vec<acp::McpServer>,
+        /// Admitted client list. `Some` replaces the actor seed; `None` leaves it
+        /// (disk/plugin rematerialize).
+        client_seed: Option<Vec<acp::McpServer>>,
         respond_to: oneshot::Sender<Result<(), acp::Error>>,
     },
     /// Re-apply per-attachment policy (MCP init strategy, delivery tools) from a resident `session/load` that carried explicit `startupHints`.

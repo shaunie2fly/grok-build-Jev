@@ -94,6 +94,11 @@ pub const COMMAND_REJECTED_TEMPORAL_UNSUPPORTED: &str = "temporal_unsupported";
 /// `detail.upstream_message` the sentence.
 pub const COMMAND_REJECTED_VOICE_CALL_UNAVAILABLE: &str = "voice_call_unavailable";
 
+/// `reason` on `command_rejected` when the upstream refused `setMainAgent` because the main bot feature is not enabled for this account: `getMainAgent` still reads the pointer, but nothing can write it until the account is enrolled.
+/// `detail.upstream` keeps the `status=400 connect=invalid_argument` excerpt
+/// and `detail.upstream_message` the sentence.
+pub const COMMAND_REJECTED_MAIN_AGENT_NOT_ENABLED: &str = "main_agent_not_enabled";
+
 /// Every `command_rejected` reason above, sorted. Codegen fails if this
 /// disagrees with the `COMMAND_REJECTED_*` consts, and the hub checks its
 /// metrics label set against it, so a new reason cannot land uncounted.
@@ -111,6 +116,7 @@ pub const COMMAND_REJECTED_REASONS: &[&str] = &[
     COMMAND_REJECTED_BOX_REFUSED,
     COMMAND_REJECTED_GATEWAY_UNKNOWN_METHOD,
     COMMAND_REJECTED_HARNESS_REFUSED,
+    COMMAND_REJECTED_MAIN_AGENT_NOT_ENABLED,
     COMMAND_REJECTED_NOT_SUPPORTED_IN_LIVE,
     COMMAND_REJECTED_NOT_YET_ENABLED,
     COMMAND_REJECTED_TEMPORAL_UNSUPPORTED,

@@ -61,18 +61,6 @@ impl AgentView {
             self.highlighted_link_idx = None;
             return InputOutcome::Action(Action::OpenLink(target));
         }
-        if crate::app::inline_edit::INLINE_EDIT_ENABLED
-            && key!(Enter).matches(key)
-            && !self.scrollback.is_selected_group_header()
-            && let Some(idx) = self.scrollback.selected()
-            && self
-                .scrollback
-                .entry(idx)
-                .is_some_and(|e| e.block.is_user_prompt())
-            && self.enter_inline_edit(idx)
-        {
-            return InputOutcome::Changed;
-        }
         let action = registry.lookup_with_mode(key, When::ScrollbackFocused, self.vim_mode);
         if action == Some(ActionId::OpenBlockViewer) && self.try_open_child_from_selected_row() {
             return InputOutcome::Changed;

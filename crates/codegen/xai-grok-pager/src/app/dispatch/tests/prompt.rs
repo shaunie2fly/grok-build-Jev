@@ -2845,7 +2845,7 @@ fn published_cycle_leave_abandons_and_blocks_approve() {
 
     let cycle = dispatch(Action::CycleMode, &mut app);
     assert!(
-        matches!(cycle.as_slice(), [Effect::SetSessionMode { .. }]),
+        matches!(cycle.first(), Some(Effect::SetSessionMode { .. })),
         "published Shift+Tab must still emit set_mode, got {cycle:?}"
     );
     let agent = agent_ref(&app, id);

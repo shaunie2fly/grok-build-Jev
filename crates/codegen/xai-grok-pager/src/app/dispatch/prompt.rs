@@ -702,6 +702,7 @@ pub(super) fn dispatch_send_prompt_submission(
     let judgment_dynamic_reasoning_enabled_from_app = app.judgment_dynamic_reasoning_enabled;
     let judgment_distillation_enabled_from_app = app.judgment_distillation_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
+    let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let login_method_id_from_app = app.login_method_id.as_ref().map(|id| id.0.to_string());
     let leader_mode = app.leader_mode;
     let screen_mode_is_minimal = app.screen_mode.is_minimal();
@@ -846,6 +847,7 @@ pub(super) fn dispatch_send_prompt_submission(
                     judgment_dynamic_reasoning_enabled: judgment_dynamic_reasoning_enabled_from_app,
                     judgment_distillation_enabled: judgment_distillation_enabled_from_app,
                     voice_stt_language: voice_stt_language_from_app,
+                    subagent_model_inheritance: subagent_model_inheritance_from_app,
                 },
             };
 

@@ -731,6 +731,9 @@ public let COMMAND_REJECTED_TEMPORAL_UNSUPPORTED: String = "temporal_unsupported
 /// `reason` on `command_rejected` when the upstream answered the voice mint with `invalid_argument` or a voice harness call with `not_found`: voice calling is not enabled for this account, or the mint was refused.
 public let COMMAND_REJECTED_VOICE_CALL_UNAVAILABLE: String = "voice_call_unavailable"
 
+/// `reason` on `command_rejected` when the upstream refused `setMainAgent` because the main bot feature is not enabled for this account: `getMainAgent` still reads the pointer, but nothing can write it until the account is enrolled.
+public let COMMAND_REJECTED_MAIN_AGENT_NOT_ENABLED: String = "main_agent_not_enabled"
+
 public func isGatewayMethodUnsupported(_ error: BotRelayError) -> Bool {
 	error.code == BotRelayErrorCode.commandRejected.rawValue
 		&& error.reason == COMMAND_REJECTED_GATEWAY_UNKNOWN_METHOD
@@ -738,7 +741,7 @@ public func isGatewayMethodUnsupported(_ error: BotRelayError) -> Bool {
 
 // Allowlisted bot-relay command schema (Args+Reply transitive closure).
 // Source: crates/common/xai-grok-bot-upstream/src/generated/{defs,methods}.rs
-// Schema closure: 515 types.
+// Schema closure: 517 types.
 
 public struct ArgsClearTrays: Codable, Sendable, Equatable {
 	public init() {}
@@ -11128,6 +11131,8 @@ public typealias ArgsSearchMedia = ArgsSearchAgents
 
 public typealias ArgsSendPrompt = SandSendPromptArgs
 
+public typealias ArgsSetAgentNotifyOnUpdates = ArgsSetAgentNotificationsEnabled
+
 public typealias ArgsSetBotTemplateVisibility = SandBotTemplateVisibilityArgs
 
 public typealias ArgsSetHostSettings = SandHostSettingsUpdate
@@ -11261,6 +11266,8 @@ public typealias ReplySetAgentAvatarBytes = SandAgentSummary?
 public typealias ReplySetAgentHiddenFromSidebar = BotRelayJSONValue
 
 public typealias ReplySetAgentNotificationsEnabled = BotRelayJSONValue
+
+public typealias ReplySetAgentNotifyOnUpdates = BotRelayJSONValue
 
 public typealias ReplySetAgentUnread = BotRelayJSONValue
 
@@ -11836,6 +11843,7 @@ public let V1_COMMAND_ALLOWLIST: [String] = [
 	"setAgentAvatarBytes",
 	"setAgentHiddenFromSidebar",
 	"setAgentNotificationsEnabled",
+	"setAgentNotifyOnUpdates",
 	"setAgentUnread",
 	"setBotTemplateVisibility",
 	"setGroupMembers",
@@ -11932,6 +11940,7 @@ public enum BotCommand: Codable, Sendable, Equatable {
 	case setAgentAvatarBytes(SetAgentAvatarBytes)
 	case setAgentHiddenFromSidebar(SetAgentHiddenFromSidebar)
 	case setAgentNotificationsEnabled(SetAgentNotificationsEnabled)
+	case setAgentNotifyOnUpdates(SetAgentNotifyOnUpdates)
 	case setAgentUnread(SetAgentUnread)
 	case setBotTemplateVisibility(SetBotTemplateVisibility)
 	case setGroupMembers(SetGroupMembers)
@@ -12784,6 +12793,17 @@ public enum BotCommand: Codable, Sendable, Equatable {
 		}
 	}
 
+	public struct SetAgentNotifyOnUpdates: Codable, Sendable, Equatable {
+		public let agentId: String
+		public let name: String
+		public let args: ArgsSetAgentNotificationsEnabled
+		public init(agentId: String, args: ArgsSetAgentNotificationsEnabled, name: String = "setAgentNotifyOnUpdates") {
+			self.agentId = agentId
+			self.name = name
+			self.args = args
+		}
+	}
+
 	public struct SetAgentUnread: Codable, Sendable, Equatable {
 		public let agentId: String
 		public let name: String
@@ -13030,6 +13050,7 @@ public enum BotCommand: Codable, Sendable, Equatable {
 		case "setAgentAvatarBytes": self = .setAgentAvatarBytes(try SetAgentAvatarBytes(from: decoder))
 		case "setAgentHiddenFromSidebar": self = .setAgentHiddenFromSidebar(try SetAgentHiddenFromSidebar(from: decoder))
 		case "setAgentNotificationsEnabled": self = .setAgentNotificationsEnabled(try SetAgentNotificationsEnabled(from: decoder))
+		case "setAgentNotifyOnUpdates": self = .setAgentNotifyOnUpdates(try SetAgentNotifyOnUpdates(from: decoder))
 		case "setAgentUnread": self = .setAgentUnread(try SetAgentUnread(from: decoder))
 		case "setBotTemplateVisibility": self = .setBotTemplateVisibility(try SetBotTemplateVisibility(from: decoder))
 		case "setGroupMembers": self = .setGroupMembers(try SetGroupMembers(from: decoder))
@@ -13131,6 +13152,7 @@ public enum BotCommand: Codable, Sendable, Equatable {
 		case .setAgentAvatarBytes(let v): try v.encode(to: encoder)
 		case .setAgentHiddenFromSidebar(let v): try v.encode(to: encoder)
 		case .setAgentNotificationsEnabled(let v): try v.encode(to: encoder)
+		case .setAgentNotifyOnUpdates(let v): try v.encode(to: encoder)
 		case .setAgentUnread(let v): try v.encode(to: encoder)
 		case .setBotTemplateVisibility(let v): try v.encode(to: encoder)
 		case .setGroupMembers(let v): try v.encode(to: encoder)
@@ -13228,6 +13250,7 @@ public enum BotCommandReplyByName {
 	public typealias SetAgentAvatarBytes = SandAgentSummary?
 	public typealias SetAgentHiddenFromSidebar = BotRelayJSONValue
 	public typealias SetAgentNotificationsEnabled = BotRelayJSONValue
+	public typealias SetAgentNotifyOnUpdates = BotRelayJSONValue
 	public typealias SetAgentUnread = BotRelayJSONValue
 	public typealias SetBotTemplateVisibility = SandBotTemplateView
 	public typealias SetGroupMembers = SandAgentSummary?

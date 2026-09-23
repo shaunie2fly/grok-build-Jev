@@ -201,6 +201,13 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                     prefix_released: std::sync::atomic::AtomicBool::new(false),
                     cancel: Default::default(),
                 },
+                long_reasoning_reminder:
+                    crate::session::long_reasoning_reminder::LongReasoningReminder {
+                        enabled: false,
+                        tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
+                        delay: crate::session::long_reasoning_reminder::DEFAULT_DELAY,
+                    },
+                long_reasoning_turn_state: Default::default(),
                 memory: crate::session::memory_state::SessionMemory {
                     configured_mode: None,
                     v2_config: Default::default(),
@@ -304,7 +311,7 @@ async fn test_e2e_idle_resume_refreshes_model_metadata() {
                 ),
                 goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
                 managed_mcp_handle: Default::default(),
-                initial_client_mcp_servers: vec![],
+                initial_client_mcp_servers: Default::default(),
                 tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),
                 mcp_announcements: Default::default(),
                 mcp_reminder_mode: McpReminderMode::Delta,

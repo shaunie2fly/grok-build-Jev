@@ -34,21 +34,20 @@ impl SlashCommand for ModelCommand {
         }
 
         // Effort phase if input is "<reasoning-model> ", else model phase.
-        if let Some(model_id) = detect_effort_phase(ctx.models, args_query) {
-            return Some(build_effort_items(ctx.models, &model_id));
+        if let Some((model_id, prefix)) = matched_reasoning_prefix(ctx.models, args_query) {
+            return Some(build_effort_items(ctx.models, &model_id, &prefix));
         }
         Some(build_model_items(ctx.models))
     }
 
     fn preselected_arg(&self, ctx: &AppCtx, args_query: &str) -> Option<String> {
-        let model_id = detect_effort_phase(ctx.models, args_query)?;
-        let model_name = ctx.models.display_name_for(&model_id);
-        // A typed effort filter hands the opening row to the match ranking
-        if !args_query.trim_end().eq_ignore_ascii_case(&model_name) {
+        let (model_id, prefix) = matched_reasoning_prefix(ctx.models, args_query)?;
+        // A typed effort filter hands the opening row to the match ranking.
+        if !args_query.trim_end().eq_ignore_ascii_case(&prefix) {
             return None;
         }
         let option = ctx.models.preselected_effort_option_for(&model_id)?;
-        Some(effort_insert_text(&model_name, &option))
+        Some(effort_insert_text(&prefix, &option))
     }
 
     fn run(&self, ctx: &mut CommandExecCtx, args: &str) -> CommandResult {
@@ -63,18 +62,8 @@ impl SlashCommand for ModelCommand {
             return CommandResult::Action(Action::SetDefaultModel(id));
         }
 
-        // A trailing effort token on a reasoning model makes a session-scoped switch (not persisted as default)
-        // Resolve via the shared gate so a rejected level (e.g. `none` on grok-4.5) reports the effort error with the model's offered ids.
-        // Without it the fall-through reports "Unknown model: … none"
-        if let Some((prefix, token)) = split_trailing_token(trimmed)
-            && let Some(id) = resolve_model(ctx.models, prefix)
-            && ctx
-                .models
-                .available
-                .get(&id)
-                .map(supports_reasoning_effort)
-                .unwrap_or(false)
-        {
+        // Trailing effort on a reasoning model is a session switch. The token keeps its spaces.
+        if let Some((id, token)) = split_model_effort(ctx.models, trimmed) {
             return match ctx.models.resolve_effort_for_model(&id, token) {
                 Ok(effort) => CommandResult::Action(Action::SwitchModel {
                     model_id: id,
@@ -88,50 +77,67 @@ impl SlashCommand for ModelCommand {
     }
 }
 
-/// Look up a model by case-insensitive display name OR model id match.
-fn resolve_model(models: &ModelState, name: &str) -> Option<acp::ModelId> {
-    models.resolve_by_name_or_id(name)
-}
-
 fn supports_reasoning_effort(info: &acp::ModelInfo) -> bool {
     supports_reasoning_effort_meta(info.meta.as_ref())
 }
 
-/// Split `args` into `(prefix, last_token)` on the final whitespace run.
-/// Returns `None` when there is no interior whitespace to split on.
-/// The token is resolved to an effort against the picked model's options by the caller.
-fn split_trailing_token(args: &str) -> Option<(&str, &str)> {
-    let (prefix, last) = args.rsplit_once(char::is_whitespace)?;
-    let prefix = prefix.trim_end();
-    if prefix.is_empty() || last.is_empty() {
-        return None;
+fn split_on_model_key<'a>(args: &'a str, key: &str) -> Option<&'a str> {
+    let rest = args.get(key.len()..)?;
+    if args
+        .get(..key.len())
+        .is_some_and(|prefix| prefix.eq_ignore_ascii_case(key))
+        && rest.starts_with(char::is_whitespace)
+    {
+        Some(rest)
+    } else {
+        None
     }
-    Some((prefix, last))
 }
 
-/// Returns the matched model id when `args_query` is `"<reasoning-model> ..."`.
-/// Candidates are tried longest name first to disambiguate names that share a prefix.
-fn detect_effort_phase(models: &ModelState, args_query: &str) -> Option<acp::ModelId> {
-    let mut candidates: Vec<(&acp::ModelId, &str)> = models
+/// Longest reasoning-model name or id that prefixes `args`, and the text after it.
+fn longest_reasoning_prefix<'a>(
+    models: &'a ModelState,
+    args: &'a str,
+) -> Option<(&'a acp::ModelId, &'a str, &'a str)> {
+    let mut best: Option<(&acp::ModelId, &str, &str)> = None;
+    for (id, info) in models
         .available
         .iter()
         .filter(|(_, info)| supports_reasoning_effort(info))
-        .map(|(id, info)| (id, info.name.as_str()))
-        .collect();
-    candidates.sort_by_key(|(_, name)| std::cmp::Reverse(name.len()));
-
-    for (id, name) in candidates {
-        if args_query
-            .get(..name.len())
-            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(name))
-            && args_query
-                .get(name.len()..)
-                .is_some_and(|rest| rest.starts_with(char::is_whitespace))
-        {
-            return Some(id.clone());
+    {
+        let name = info.name.as_str();
+        let id_str = id.0.as_ref();
+        for key in [name, id_str] {
+            if best.is_some_and(|(_, prev, _)| prev.len() >= key.len()) {
+                continue;
+            }
+            if let Some(rest) = split_on_model_key(args, key) {
+                best = Some((id, key, rest));
+            }
         }
     }
-    None
+    best
+}
+
+fn split_model_effort<'a>(
+    models: &'a ModelState,
+    args: &'a str,
+) -> Option<(acp::ModelId, &'a str)> {
+    let (id, _, rest) = longest_reasoning_prefix(models, args)?;
+    let token = rest.trim();
+    if token.is_empty() {
+        None
+    } else {
+        Some((id.clone(), token))
+    }
+}
+
+fn matched_reasoning_prefix(
+    models: &ModelState,
+    args_query: &str,
+) -> Option<(acp::ModelId, String)> {
+    let (id, key, _) = longest_reasoning_prefix(models, args_query)?;
+    Some((id.clone(), key.to_string()))
 }
 
 /// One row per logical model.
@@ -168,24 +174,23 @@ fn build_model_items(models: &ModelState) -> Vec<ArgItem> {
 }
 
 /// One row per effort level for the `/model` chained effort phase.
-/// `insert_text` is `"ModelName high"` so selecting a row completes both tokens.
-fn build_effort_items(models: &ModelState, model_id: &acp::ModelId) -> Vec<ArgItem> {
-    let info = match models.available.get(model_id) {
-        Some(info) => info,
-        None => return Vec::new(),
-    };
+/// `prefix` is the name or catalog id the user typed. `insert_text` is `"{prefix} {effort}"`.
+fn build_effort_items(models: &ModelState, model_id: &acp::ModelId, prefix: &str) -> Vec<ArgItem> {
+    if !models.available.contains_key(model_id) {
+        return Vec::new();
+    }
     let is_current_model = models.current.as_ref() == Some(model_id);
     let options = models.reasoning_effort_options_for(model_id);
     build_effort_arg_items(
         &options,
         models.reasoning_effort,
         is_current_model,
-        |option| effort_insert_text(&info.name, option),
+        |option| effort_insert_text(prefix, option),
     )
 }
 
-fn effort_insert_text(model_name: &str, option: &ReasoningEffortOption) -> String {
-    format!("{model_name} {}", option.id)
+fn effort_insert_text(prefix: &str, option: &ReasoningEffortOption) -> String {
+    format!("{prefix} {}", option.id)
 }
 
 #[cfg(test)]
@@ -240,17 +245,25 @@ mod tests {
     }
 
     #[test]
-    fn split_trailing_token_splits_on_final_whitespace() {
+    fn split_model_effort_keeps_a_multi_word_label() {
+        let mut state = ModelState::default();
+        let (id, info) = model_with_reasoning("grok-4.7", "Grok 4.7");
+        state.available.insert(id.clone(), info);
         assert_eq!(
-            split_trailing_token("Reasoning X high"),
-            Some(("Reasoning X", "high"))
+            split_model_effort(&state, "Grok 4.7 Extra High")
+                .map(|(model, token)| { (model.0.to_string(), token.to_string()) }),
+            Some(("grok-4.7".to_string(), "Extra High".to_string()))
         );
         assert_eq!(
-            split_trailing_token("reasoning-x  xhigh"),
-            Some(("reasoning-x", "xhigh"))
+            split_model_effort(&state, "Grok 4.7 high").map(|(_, token)| token),
+            Some("high")
         );
-        // No interior whitespace, so nothing to split off
-        assert!(split_trailing_token("reasoning-x-pro").is_none());
+        assert!(split_model_effort(&state, "Grok 4.7").is_none());
+        assert_eq!(
+            split_model_effort(&state, "grok-4.7 Extra High")
+                .map(|(model, token)| (model.0.to_string(), token.to_string())),
+            Some(("grok-4.7".to_string(), "Extra High".to_string()))
+        );
     }
 
     #[test]

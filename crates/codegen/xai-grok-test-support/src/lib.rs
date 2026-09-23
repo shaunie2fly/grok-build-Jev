@@ -22,7 +22,7 @@
 //! - [`spawn_counting_server`]: Connection-counting HTTP/1.1 server for wire/pooling tests
 //! - [`uds_proxy::UdsProxy`]: Frame-aware fault-injection proxy for leader IPC sockets (unix)
 //! - [`ResourceSnapshot`]: RSS/threads/fds sampling for soak tests
-//! - [`MockOtelServer`]: OTLP/HTTP collector recording the shell's exported logs and metrics as typed events in its [`OtelRecorder`]
+//! - [`MockOtelServer`]: OTLP/HTTP collector recording the shell's exported logs, metrics, and traces
 //! - [`OtelRecorder`]: the mock OTLP server's log, which a test reads and waits on, or fills from its own OTLP transport
 //! - [`MockManagedConfigServer`]: mock of the server the managed configuration supervisor fetches policy from
 //! - [`ManagedPolicy`]: the configuration row the mock server serves for one principal, signed by a [`TestSigningKey`] or not
@@ -130,7 +130,8 @@ pub use mock_server::{
 };
 pub use otel_event::{
     OtelAttributes, OtelBody, OtelDecodeError, OtelEvent, OtelExport, OtelFault, OtelLogRecord,
-    OtelMetricData, OtelMetricPoint, OtelNumber, OtelSignal, OtelTemporality, OtelUnreadBody,
+    OtelMetricData, OtelMetricPoint, OtelNumber, OtelSignal, OtelSpan, OtelTemporality,
+    OtelUnreadBody,
 };
 pub use otel_recorder::{OtelRecorder, OtelRecorderError};
 #[cfg(unix)]

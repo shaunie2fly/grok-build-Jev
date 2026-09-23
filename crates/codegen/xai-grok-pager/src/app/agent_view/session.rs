@@ -416,8 +416,6 @@ impl AgentView {
             cancel_trigger_hint: None,
             rewind_state: None,
             rewind_points: None,
-            inline_edit: None,
-            pending_inline_resubmit: None,
             jump_state: None,
             timeline_rail: None,
             timeline_hover: None,

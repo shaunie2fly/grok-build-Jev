@@ -56,6 +56,7 @@ use super::session::modal::{
     dispatch_rename_session, dispatch_reset_session_title, dispatch_sessions_confirm_close,
     drop_other_agents_in_minimal,
 };
+use super::settings::handle_feature_override_persisted;
 use super::settings::setters::set_default_model_inner;
 use super::settings::ui::{action_for_reset, apply_setting_rollback};
 use super::status::scrub_error_for_toast;
@@ -200,6 +201,9 @@ fn test_app() -> AppView {
         judgment_safety_gate_enabled: None,
         judgment_dynamic_reasoning_enabled: None,
         judgment_distillation_enabled: None,
+        subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
+            xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
+        ),
         zdr_access_enabled: false,
         usage_billing_redirect_url: None,
         access_gate_shown_logged: false,

@@ -77,11 +77,12 @@ pub struct SessionHandle {
     pub emit_local_background_tasks: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Status-line and live user-echo gates. Shared with [`super::notifications::NotificationSender`].
     pub(crate) client_caps: super::notifications::SessionClientCaps,
-    /// MCP server configs for this session (merged local and client-provided).
-    /// Stored on the handle so forked sessions can inherit the parent's MCP servers without a round-trip through the session actor.
-    pub mcp_servers: Vec<acp::McpServer>,
+    /// Admitted MCP servers (disk, client, and the current agent.md overlay).
+    /// Shared with the actor's `McpState`: config commits publish here, and forks
+    /// snapshot the cell so they see the current seat's servers and headers.
+    pub mcp_servers: super::mcp_servers::AdmittedMcpServers,
     /// Client-provided MCP servers as admitted by the vendor `mcps` kill-switch, before merging with disk/plugin/managed servers.
-    /// Hot-reloads re-merge from this seed; a server the kill-switch rejected cannot reappear because its on-disk attribution vanished mid-session.
+    /// Writers assign this through `with_resident_mut` before enqueue. The actor keeps its own copy, updated from `UpdateMcpServers.client_seed`.
     pub initial_client_mcp_servers: Vec<acp::McpServer>,
     /// Stable display path for forked sessions (original project path).
     /// When set, the hunk tracker extension handler rewrites worktree paths in API responses to this path.

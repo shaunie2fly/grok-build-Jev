@@ -1366,7 +1366,7 @@ fn test_search_tool_call_flow() {
         );
     }
 }
-/// ScrollbackState with an explicit `expanded_by_default` shape override (flag-independent: the `Some` beats the `collapsed_edit_blocks` cache).
+/// Scrollback with pager.toml `expanded_by_default` set. Does not touch the flag cache.
 fn edit_config_scrollback(expanded_by_default: bool) -> ScrollbackState {
     use crate::appearance::AppearanceConfig;
     let mut sb = ScrollbackState::new();
@@ -1393,6 +1393,11 @@ fn pending_other_tool_call(tc_id: &Arc<str>) -> acp::SessionUpdate {
 /// leave a stale mode in place.
 #[test]
 fn edit_tool_upgrade_resets_display_mode_to_default() {
+    std::thread::spawn(edit_tool_upgrade_resets_display_mode_to_default_body)
+        .join()
+        .unwrap();
+}
+fn edit_tool_upgrade_resets_display_mode_to_default_body() {
     use crate::scrollback::types::DisplayMode;
     /// Drive Pending(Other) through InProgress(Edit) to Completed.
     /// Returns the display mode observed after the InProgress upgrade and after completion.
@@ -1443,6 +1448,7 @@ fn edit_tool_upgrade_resets_display_mode_to_default() {
         );
         entry.display_mode
     }
+    crate::appearance::cache::set_collapsed_edit_blocks(false);
     let (upgraded, completed) = upgrade_path("toolu_edit_001", false);
     assert_eq!(
         upgraded,
@@ -4765,16 +4771,14 @@ fn replay_malformed_skill_token_ranges_degrade_to_plain() {
     }
 }
 /// A persisted interjection chunk as the shell writes it: the model-facing frame as text,
-/// the typed text in `displayText`, and the `interjection` chunk flag (wire literals pinned here).
+/// the typed text in `displayText`, and the `interjection` chunk flag.
 fn interjection_user_message(typed: &str) -> acp::SessionUpdate {
     let mut chunk_meta = serde_json::Map::new();
     chunk_meta.insert("modelId".into(), serde_json::json!("test-model"));
     chunk_meta.insert("interjection".into(), serde_json::Value::Bool(true));
     let mut text_meta = serde_json::Map::new();
     text_meta.insert("displayText".into(), serde_json::json!(typed));
-    let framed = format!(
-        "The user sent a message while you were working:\n<user_query>\n{typed}\n</user_query>\nMake sure to complete any unfinished tasks from previous turns."
-    );
+    let framed = xai_interjection_core::format_interjection(typed.to_string());
     acp::SessionUpdate::UserMessageChunk(
         acp::ContentChunk::new(acp::ContentBlock::Text(
             acp::TextContent::new(framed).meta(Some(text_meta)),

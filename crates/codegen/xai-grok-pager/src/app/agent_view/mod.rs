@@ -1375,12 +1375,6 @@ pub struct AgentView {
     pub(crate) cancel_trigger_hint: Option<crate::app::actions::CancelTrigger>,
     pub(crate) rewind_state: Option<crate::views::rewind::RewindState>,
     pub(crate) rewind_points: Option<Vec<crate::views::rewind::RewindPointInfo>>,
-    /// In-place edit of a previous user prompt. See `inline_edit.rs`.
-    pub(crate) inline_edit: Option<crate::app::inline_edit::InlineEditState>,
-    /// Edited text awaiting its rewind; `dispatch_rewind_success` resubmits it.
-    /// Set only when the rewind flow emits `Effect::RewindExecute` while the inline editor is open (see `stash_inline_resubmit_if_editing`).
-    /// inline editor is open (see `stash_inline_resubmit_if_editing`).
-    pub(crate) pending_inline_resubmit: Option<String>,
     /// `/jump` picker overlay (pure client-side turn navigation).
     pub(crate) jump_state: Option<crate::views::jump::JumpState>,
     /// Timeline sidebar rail geometry for the current frame (`None` means

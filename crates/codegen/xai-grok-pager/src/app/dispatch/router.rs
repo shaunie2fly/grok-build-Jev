@@ -50,9 +50,9 @@ use super::prompt::{
 use super::queue;
 use super::queue::dispatch_drain_queue;
 use super::rewind::{
-    dispatch_inline_edit_submit, dispatch_rewind, dispatch_rewind_cancel_offer,
-    dispatch_rewind_confirm, dispatch_rewind_confirm_never_ask, dispatch_rewind_dismiss,
-    dispatch_rewind_dismiss_error, dispatch_rewind_picker_select, dispatch_rewind_show_picker,
+    dispatch_rewind, dispatch_rewind_cancel_offer, dispatch_rewind_confirm,
+    dispatch_rewind_confirm_never_ask, dispatch_rewind_dismiss, dispatch_rewind_dismiss_error,
+    dispatch_rewind_picker_select, dispatch_rewind_show_picker,
 };
 use super::session::foreign::dispatch_fetch_session_list;
 use super::session::fork::{
@@ -75,11 +75,11 @@ use super::session::load::{
 };
 use super::session::modal::{dispatch_rename_session, dispatch_reset_session_title};
 use super::settings::setters::{
-    clear_default_model, clear_fork_secondary_model, preview_auto_dark_theme,
-    preview_auto_light_theme, preview_theme, set_ask_user_question_timeout_enabled,
-    set_auto_dark_theme, set_auto_light_theme, set_auto_update, set_collapsed_edit_blocks,
-    set_combine_queued_prompts, set_compact_mode, set_confirm_before_rewind,
-    set_contextual_hint_export_copy, set_contextual_hint_image_input,
+    clear_default_model, clear_fork_secondary_model, clear_subagent_model_inheritance,
+    preview_auto_dark_theme, preview_auto_light_theme, preview_theme,
+    set_ask_user_question_timeout_enabled, set_auto_dark_theme, set_auto_light_theme,
+    set_auto_update, set_collapsed_edit_blocks, set_combine_queued_prompts, set_compact_mode,
+    set_confirm_before_rewind, set_contextual_hint_export_copy, set_contextual_hint_image_input,
     set_contextual_hint_plan_mode, set_contextual_hint_send_now, set_contextual_hint_small_screen,
     set_contextual_hint_ssh_wrap, set_contextual_hint_undo, set_contextual_hint_word_select,
     set_default_model, set_default_selected_permission, set_display_refresh_auto_cadence,
@@ -89,7 +89,8 @@ use super::settings::setters::{
     set_max_thoughts_width, set_multiline_mode, set_page_flip_on_send, set_prompt_suggestions,
     set_remember_tool_approvals, set_render_mermaid, set_respect_manual_folds, set_screen_mode,
     set_scroll_lines, set_scroll_mode, set_scroll_speed, set_show_thinking_blocks, set_show_tips,
-    set_simple_mode, set_theme, set_timeline, set_timestamps, set_vim_mode, set_voice_capture_mode,
+    set_simple_mode, set_subagent_model_inheritance, set_theme, set_timeline, set_timestamps,
+    set_vim_mode, set_voice_capture_mode,
     set_voice_keybind_enabled, set_voice_stt_language,
 };
 use super::settings::ui::{
@@ -1124,6 +1125,8 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
             set_judgment_dynamic_reasoning_enabled(app, v)
         }
         Action::SetJudgmentDistillationEnabled(v) => set_judgment_distillation_enabled(app, v),
+        Action::SetSubagentModelInheritance(v) => set_subagent_model_inheritance(app, v),
+        Action::ClearSubagentModelInheritance => clear_subagent_model_inheritance(app),
         Action::SetKeepTextSelection(v) => set_keep_text_selection(app, v),
         Action::SetScrollSpeed(v) => set_scroll_speed(app, v),
         Action::SetScrollMode(v) => set_scroll_mode(app, v),
@@ -1605,7 +1608,6 @@ fn dispatch_inner(action: Action, app: &mut AppView) -> Vec<Effect> {
         Action::RewindCancelOffer => dispatch_rewind_cancel_offer(app),
         Action::RewindDismiss => dispatch_rewind_dismiss(app),
         Action::RewindDismissError => dispatch_rewind_dismiss_error(app),
-        Action::InlineEditSubmit => dispatch_inline_edit_submit(app),
         Action::JumpShowPicker => dispatch_jump_show_picker(app),
         Action::JumpPickerSelect(turn_idx) => dispatch_jump_picker_select(app, turn_idx),
         Action::JumpDismiss => dispatch_jump_dismiss(app),

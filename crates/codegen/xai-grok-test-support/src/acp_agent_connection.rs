@@ -206,6 +206,25 @@ impl AgentConnection {
             .await
     }
 
+    pub(crate) async fn prompt_with_meta(
+        &self,
+        session_id: &acp::SessionId,
+        text: &str,
+        meta: serde_json::Value,
+    ) -> acp::Result<acp::PromptResponse> {
+        self.conn
+            .prompt(
+                acp::PromptRequest::new(
+                    session_id.clone(),
+                    vec![acp::ContentBlock::Text(acp::TextContent::new(
+                        text.to_owned(),
+                    ))],
+                )
+                .meta(meta.as_object().cloned()),
+            )
+            .await
+    }
+
     pub(crate) async fn prompt_blocks(
         &self,
         session_id: &acp::SessionId,

@@ -18,10 +18,14 @@ pub enum TaskModelSelection {
 }
 
 /// Task tool configuration, stored as `Params<TaskParams>`.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct TaskParams {
     #[serde(default)]
     pub model_selection: TaskModelSelection,
+    /// Fresh spawns that omit a type use this when general-purpose is not spawnable
+    /// and the parent allowlist names exactly one other type. Not a model argument.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub implicit_subagent_type: Option<String>,
 }
 
 crate::register_resource!("grok_build", "TaskParams", TaskParams);

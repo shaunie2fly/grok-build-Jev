@@ -184,6 +184,8 @@ pub struct WorkspaceSession {
     path_virtualization: OnceLock<crate::path_virtualization::PathVirtualization>,
     /// Rewritten bind cwd installed on rebind when path virt turns on after the session was first created without `session_root`.
     cwd_override: OnceLock<PathBuf>,
+    /// In-progress `workspace.client_fs_write_file` uploads bound to this session.
+    staged_uploads: crate::file_system::client_fs::StagedUploads,
 }
 struct WorkspaceSessionInner {
     effective_tool_config: Arc<ToolServerConfig>,
@@ -320,7 +322,12 @@ impl WorkspaceSession {
             system_notify_producers: std::sync::Mutex::new(Vec::new()),
             path_virtualization: OnceLock::new(),
             cwd_override: OnceLock::new(),
+            staged_uploads: Default::default(),
         }
+    }
+    /// Staged `client_fs_write_file` uploads owned by this session.
+    pub(crate) fn staged_uploads(&self) -> &crate::file_system::client_fs::StagedUploads {
+        &self.staged_uploads
     }
     pub(crate) fn set_path_virtualization(
         &self,
@@ -632,6 +639,8 @@ pub struct WorkspaceShared {
     /// Live server connection handle. `None` until [`WorkspaceHandle::connect_hub`](crate::handle::WorkspaceHandle::connect_hub) is called (or if no [`HubConfig`] was provided).
     /// Uses `tokio::sync::Mutex` so the guard can be held across the async `HubHandle::connect()` call, preventing TOCTOU races.
     pub(crate) hub_handle: tokio::sync::Mutex<Option<HubHandle>>,
+    pub(crate) queue_stats_sampler:
+        parking_lot::Mutex<Option<crate::upload::QueueStatsSamplerGuard>>,
     /// Remote-origin tool configs (consumer direction), updated by the notification listener.
     pub(crate) hub_tools_snapshot: arc_swap::ArcSwap<Vec<ToolConfig>>,
     /// Server config stashed at construction time for deferred connect.

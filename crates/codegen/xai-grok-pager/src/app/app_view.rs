@@ -1049,6 +1049,8 @@ pub struct AppView {
     pub judgment_dynamic_reasoning_enabled: Option<bool>,
     /// Persisted `[judgment].distill_outputs` mirror. `None` means unset (default `true`).
     pub judgment_distillation_enabled: Option<bool>,
+    /// `[features].subagent_model_inheritance` as the settings modal shows it: the saved user key plus the tiers seeded at startup.
+    pub subagent_model_inheritance: crate::settings::FeatureOverrideState,
     /// Whether ZDR users are allowed to use the product.
     /// Server-controlled via RemoteSettings (remote settings). Default `false` (blocked) during beta.
     pub zdr_access_enabled: bool,
@@ -1571,6 +1573,9 @@ impl AppView {
             judgment_safety_gate_enabled: None,
             judgment_dynamic_reasoning_enabled: None,
             judgment_distillation_enabled: None,
+            subagent_model_inheritance: crate::settings::FeatureOverrideState::new(
+                xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
+            ),
             zdr_access_enabled: false,
             usage_billing_redirect_url: None,
             access_gate_shown_logged: false,
@@ -3712,6 +3717,11 @@ fn handle_welcome_input(ev: &Event, ctx: &mut WelcomeInputCtx<'_>) -> InputOutco
             if ctx.registry.matches_id(ActionId::OpenSessions, key) {
                 return InputOutcome::Action(Action::FetchSessionList);
             }
+            if ctx.registry.matches_id(ActionId::CommandPalette, key)
+                && !crate::input::key::is_text_input_key(key)
+            {
+                return InputOutcome::ActionThenForward(Action::LeaveHome);
+            }
             if ctx.has_pending_update && key!('u', CONTROL).matches(key) {
                 return InputOutcome::Action(Action::QuitForUpdate);
             }
@@ -4705,11 +4715,13 @@ impl AppView {
                                 panel.render(full_area, f.buffer_mut());
                             }
                             let has_cloud_modal = false;
-                            let cursor = if has_cloud_modal || self.tutorial.is_some() {
-                                None
-                            } else {
-                                result.cursor_pos
-                            };
+                            let has_remote_modal = false;
+                            let cursor =
+                                if has_cloud_modal || has_remote_modal || self.tutorial.is_some() {
+                                    None
+                                } else {
+                                    result.cursor_pos
+                                };
                             let on_url = self.welcome_auth_url_rect.as_ref().is_some_and(|r| {
                                 matches!(self.auth_state, AuthState::Authenticating { .. })
                                     && self.last_mouse_pos.is_some_and(|(mx, my)| {
@@ -4860,17 +4872,20 @@ impl AppView {
                                 }
                                 let (cursor_pos, post_flush) = result;
                                 let has_cloud = false;
+                                let has_remote_modal = false;
                                 if has_cloud
+                                    || has_remote_modal
                                     || self.import_claude_modal.is_some()
                                     || self.tutorial.is_some()
                                 {
                                     link_spans.clear();
                                 }
-                                let cursor = if has_cloud || self.tutorial.is_some() {
-                                    None
-                                } else {
-                                    cursor_pos
-                                };
+                                let cursor =
+                                    if has_cloud || has_remote_modal || self.tutorial.is_some() {
+                                        None
+                                    } else {
+                                        cursor_pos
+                                    };
                                 return (cursor, Self::merge_escapes(notif_escapes, post_flush));
                             }
                         }
@@ -5156,6 +5171,11 @@ impl AppView {
             || matches!(self.active_view, ActiveView::AgentDashboard
                 if self.dashboard_session_picker.is_some())
             || cloud_modal_open
+            || self.remote_modal_open()
+    }
+    /// The `/remote` modal, behind its backend feature like the field itself.
+    fn remote_modal_open(&self) -> bool {
+        false
     }
     /// Store the resolved per-tip gates and propagate the prompt-relevant tips (undo and plan nudge) to every agent's prompt.
     /// Reused by startup and the settings live-apply path so a runtime toggle reaches existing agents.

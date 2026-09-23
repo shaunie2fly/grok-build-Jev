@@ -303,6 +303,22 @@ fn stream_no_terminal_error() -> xai_tool_runtime::ToolError {
         "dispatch stream ended without a terminal item",
     )
 }
+fn context_for_call(
+    tool_call_id: &str,
+    cwd_override: Option<std::path::PathBuf>,
+    cancellation: Option<tokio_util::sync::CancellationToken>,
+) -> xai_tool_runtime::ToolCallContext {
+    let call_id = xai_tool_protocol::ToolCallId::new(tool_call_id)
+        .unwrap_or_else(|_| xai_tool_protocol::ToolCallId::new_v7());
+    let mut ctx = xai_tool_runtime::ToolCallContext::new(call_id);
+    if let Some(cwd) = cwd_override {
+        ctx.insert(xai_tool_runtime::Cwd(cwd));
+    }
+    if let Some(cancellation) = cancellation {
+        ctx.insert(xai_tool_runtime::Cancellation(cancellation));
+    }
+    ctx
+}
 /// Converts a dispatch's `serde_json::Value` back into a `ToolOutput`.
 type OutputConverter =
     Arc<dyn Fn(serde_json::Value) -> Result<ToolOutput, serde_json::Error> + Send + Sync>;
@@ -394,6 +410,11 @@ struct FinalizedTool {
     /// `"legacy-0.4.10"`). `None` for unmanaged tools and dynamically
     /// registered (MCP) tools.
     contract_version: Option<String>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RegisteredToolIdentity {
+    pub tool_id: String,
+    pub version: Option<String>,
 }
 /// Toolset produced by `ToolRegistryBuilder::finalize()`. The tools vector is wrapped in `parking_lot::RwLock` to allow
 /// concurrent read access (tool dispatch) with rare write access (MCP tool registration). The read guard is held only
@@ -969,7 +990,8 @@ impl ToolRegistryBuilder {
             crate::implementations::grok_build::send_feedback::drafts_file_path(&session_folder.0);
         let renderer = TemplateRenderer::new(kind_to_name.clone(), kind_params.clone())
             .with_system_reminders_enabled(self.system_reminders_enabled)
-            .with_feedback_drafts_path(feedback_drafts_path);
+            .with_feedback_drafts_path(feedback_drafts_path)
+            .with_whole_read(truncation_config.whole_read);
         let mut tools = Vec::new();
         let mut resources = Resources::new();
         resources.insert(crate::types::resources::Terminal(ctx.backend));
@@ -1352,6 +1374,20 @@ impl FinalizedToolset {
     pub fn tool_name_for_kind(&self, kind: ToolKind) -> Option<String> {
         self.renderer.tool_for_kind(kind).map(str::to_owned)
     }
+    /// Qualified registration id (`GrokBuild:read_file`) and managed behavior version.
+    /// Lookup is by the finalized client-facing name. Unknown, custom, and dynamic
+    /// registrations return `None`; callers use one opaque class instead of the alias.
+    pub fn registered_identity(&self, client_name: &str) -> Option<RegisteredToolIdentity> {
+        let tools = self.tools.read();
+        let tool = tools.iter().find(|tool| tool.client_name == client_name)?;
+        if tool.namespace == ToolNamespace::MCP.to_string() {
+            return None;
+        }
+        Some(RegisteredToolIdentity {
+            tool_id: format!("{}:{}", tool.namespace, tool.id),
+            version: tool.contract_version.clone(),
+        })
+    }
     /// Client-facing name for a canonical registry ID, honoring name overrides.
     pub fn tool_name_for_registry_id(&self, registry_id: &str) -> Option<String> {
         self.tools
@@ -1484,6 +1520,18 @@ impl FinalizedToolset {
         tool_name: &str,
         input: &crate::implementations::UseToolInput,
     ) -> Result<serde_json::Value, xai_tool_runtime::ToolError> {
+        let value = serde_json::to_value(input)
+            .map_err(|e| xai_tool_runtime::ToolError::invalid_arguments(e.to_string()))?;
+        self.model_facing_arguments(tool_name, value)
+    }
+    /// Project canonical argument keys onto this tool's model-facing names.
+    ///
+    /// Same reverse map as [`Self::model_mcp_arguments`].
+    pub fn model_facing_arguments(
+        &self,
+        tool_name: &str,
+        canonical: serde_json::Value,
+    ) -> Result<serde_json::Value, xai_tool_runtime::ToolError> {
         let tools = self.tools.read();
         let tool = tools
             .iter()
@@ -1492,11 +1540,9 @@ impl FinalizedToolset {
         let forward: HashMap<_, _> = tool
             .reverse_params
             .iter()
-            .map(|(client, canonical)| (canonical.clone(), client.clone()))
+            .map(|(client, name)| (name.clone(), client.clone()))
             .collect();
-        let value = serde_json::to_value(input)
-            .map_err(|e| xai_tool_runtime::ToolError::invalid_arguments(e.to_string()))?;
-        crate::util::remap::remap_json_keys_checked(value, &forward)
+        crate::util::remap::remap_json_keys_checked(canonical, &forward)
             .map_err(xai_tool_runtime::ToolError::invalid_arguments)
     }
     pub async fn try_parse(
@@ -1564,6 +1610,7 @@ impl FinalizedToolset {
         if let Some(cwd) = parent_ctx.extensions.get::<xai_tool_runtime::Cwd>() {
             ctx.extensions.insert((*cwd).clone());
         }
+        crate::types::source_summary::copy_call_facts(&parent_ctx, &mut ctx);
         let tool_id = xai_tool_protocol::ToolId::new(&registry_id)
             .unwrap_or_else(|_| xai_tool_protocol::ToolId::new("unknown").expect("valid"));
         let lr_handle = self.local_registry.find(&tool_id).ok_or_else(|| {
@@ -1599,14 +1646,22 @@ impl FinalizedToolset {
         cwd_override: Option<std::path::PathBuf>,
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<ToolRunResult, xai_tool_runtime::ToolError> {
-        use futures::StreamExt;
-        let mut stream = self.call_streaming_with_cancellation(
+        self.call_with_context(
             tool_name,
             tool_args,
-            tool_call_id,
-            cwd_override,
-            cancellation,
-        );
+            context_for_call(tool_call_id, cwd_override, cancellation),
+        )
+        .await
+    }
+    /// Dispatch with a caller-built context. Host resources replace anything the caller supplied.
+    pub async fn call_with_context(
+        self: &Arc<Self>,
+        tool_name: &str,
+        tool_args: serde_json::Value,
+        ctx: xai_tool_runtime::ToolCallContext,
+    ) -> Result<ToolRunResult, xai_tool_runtime::ToolError> {
+        use futures::StreamExt;
+        let mut stream = self.call_streaming_with_context(tool_name, tool_args, ctx);
         while let Some(item) = stream.next().await {
             match item {
                 xai_tool_runtime::ToolStreamItem::Progress(_) => continue,
@@ -1642,17 +1697,26 @@ impl FinalizedToolset {
         cwd_override: Option<std::path::PathBuf>,
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> xai_tool_runtime::ToolStream<ToolRunResult> {
+        self.call_streaming_with_context(
+            tool_name,
+            tool_args,
+            context_for_call(tool_call_id, cwd_override, cancellation),
+        )
+    }
+    pub fn call_streaming_with_context(
+        self: &Arc<Self>,
+        tool_name: &str,
+        tool_args: serde_json::Value,
+        ctx: xai_tool_runtime::ToolCallContext,
+    ) -> xai_tool_runtime::ToolStream<ToolRunResult> {
         use futures::StreamExt;
         let this = Arc::clone(self);
         let tool_name = tool_name.to_owned();
-        let tool_call_id = tool_call_id.to_owned();
         Box::pin(async_stream::stream! {
             let parts = match this.prepare_dispatch(
                 &tool_name,
                 tool_args,
-                &tool_call_id,
-                cwd_override,
-                cancellation,
+                ctx,
             ) {
                 Ok(parts) => parts,
                 Err(e) => {
@@ -1697,9 +1761,7 @@ impl FinalizedToolset {
         self: &Arc<Self>,
         tool_name: &str,
         tool_args: serde_json::Value,
-        tool_call_id: &str,
-        cwd_override: Option<std::path::PathBuf>,
-        cancellation: Option<tokio_util::sync::CancellationToken>,
+        mut ctx: xai_tool_runtime::ToolCallContext,
     ) -> Result<DispatchParts, xai_tool_runtime::ToolError> {
         let (registry_id, output_converter, reverse_params, is_mcp_wrapper) = {
             let tools = self.tools.read();
@@ -1732,24 +1794,15 @@ impl FinalizedToolset {
             None
         };
         let contract_version = self.get_contract_version(tool_name);
-        let rt_call_id = xai_tool_protocol::ToolCallId::new(tool_call_id)
-            .unwrap_or_else(|_| xai_tool_protocol::ToolCallId::new_v7());
-        let mut ctx = xai_tool_runtime::ToolCallContext::new(rt_call_id);
         ctx.extensions.insert(self.resources.clone());
         ctx.extensions.insert_arc(Arc::clone(&self.renderer));
         ctx.extensions.insert(
             crate::types::resources::InvokingToolParamNames::from_reverse_params(&reverse_params),
         );
-        if let Some(cwd) = cwd_override {
-            ctx.extensions.insert(xai_tool_runtime::Cwd(cwd));
-        }
-        if let Some(cancellation) = cancellation {
+        ctx.extensions.remove::<xai_tool_runtime::BehaviorVersion>();
+        if let Some(version) = contract_version {
             ctx.extensions
-                .insert(xai_tool_runtime::Cancellation(cancellation));
-        }
-        if let Some(ref version) = contract_version {
-            ctx.extensions
-                .insert(xai_tool_runtime::BehaviorVersion(version.clone()));
+                .insert(xai_tool_runtime::BehaviorVersion(version));
         }
         ctx.extensions.insert(InnerDispatch(std::sync::Arc::new(
             InnerDispatchForToolset {
@@ -1758,6 +1811,9 @@ impl FinalizedToolset {
         )));
         if let Some(wvc) = self.workspace_viewer_ctx.as_ref() {
             ctx.extensions.insert(wvc.clone());
+        } else {
+            ctx.extensions
+                .remove::<xai_tool_runtime::WorkspaceViewerContext>();
         }
         let tool_id = xai_tool_protocol::ToolId::new(&registry_id)
             .unwrap_or_else(|_| xai_tool_protocol::ToolId::new("unknown").expect("valid"));
@@ -3264,6 +3320,42 @@ mod tests {
         ) -> Result<String, xai_tool_runtime::ToolError> {
             Ok("ok".into())
         }
+    }
+    #[tokio::test]
+    async fn registered_identity_uses_the_qualified_id_not_the_alias() {
+        let tmp = TempDir::new().unwrap();
+        let toolset = ToolRegistryBuilder::new()
+            .finalize(
+                ToolServerConfig {
+                    tools: vec![
+                        ToolConfig::for_tool::<crate::implementations::grok_build::grep::GrepTool>(
+                        )
+                        .with_name("search_code"),
+                    ],
+                    behavior_preset: None,
+                },
+                test_session_context(&tmp),
+            )
+            .expect("grep should finalize");
+        assert_eq!(
+            toolset.registered_identity("search_code"),
+            Some(RegisteredToolIdentity {
+                tool_id: "GrokBuild:grep".into(),
+                version: Some("current".into()),
+            })
+        );
+        assert_eq!(toolset.registered_identity("grep"), None);
+        assert_eq!(toolset.registered_identity("not_a_tool"), None);
+        toolset
+            .register_tool(
+                "docs__search".into(),
+                FakeMcpTool {
+                    description: "d".into(),
+                },
+                None,
+            )
+            .expect("dynamic tool should register");
+        assert_eq!(toolset.registered_identity("docs__search"), None);
     }
     #[tokio::test]
     async fn call_sets_effective_tool_name_for_use_tool_dispatch() {
@@ -5032,9 +5124,7 @@ mod tests {
             .prepare_dispatch(
                 "read_file",
                 serde_json::json!({"target_file": "noop"}),
-                "test-call",
-                None,
-                None,
+                context_for_call("test-call", None, None),
             )
             .expect("prepare_dispatch succeeds");
         let wvc = parts
@@ -5051,9 +5141,7 @@ mod tests {
             .prepare_dispatch(
                 "read_file",
                 serde_json::json!({"target_file": "noop"}),
-                "test-call",
-                None,
-                None,
+                context_for_call("test-call", None, None),
             )
             .expect("prepare_dispatch succeeds");
         assert!(
@@ -5064,6 +5152,39 @@ mod tests {
                 .is_none(),
             "no extension must be stamped when workspace_viewer_ctx is None",
         );
+    }
+    #[tokio::test]
+    async fn prepare_dispatch_keeps_the_source_slot_and_replaces_resources() {
+        let (toolset, _tmp) = toolset_with_viewer_ctx(None);
+        let slot = crate::types::source_summary::SourceSummarySlot::new();
+        let incoming = crate::types::resources::Resources::new().into_shared();
+        let mut ctx = context_for_call("test-call", None, None);
+        ctx.insert(slot.clone());
+        ctx.insert(incoming.clone());
+        let parts = toolset
+            .prepare_dispatch("read_file", serde_json::json!({"target_file": "noop"}), ctx)
+            .expect("prepare_dispatch succeeds");
+        let kept = parts
+            .ctx
+            .get::<crate::types::source_summary::SourceSummarySlot>()
+            .expect("slot");
+        let mut detail = crate::types::source_summary::ReadDetail::unknown();
+        detail.role = crate::types::source_summary::ReadRole::SkillEntry;
+        slot.record(crate::types::source_summary::ToolSourceSummary {
+            result: crate::types::source_summary::ToolSourceResult::Failed(None),
+            output_limit: crate::types::source_summary::ToolOutputLimit::Unobserved,
+            detail: crate::types::source_summary::ToolSourceDetail::Read(detail),
+        });
+        assert_eq!(
+            kept.snapshot().read().map(|read| read.role),
+            Some(crate::types::source_summary::ReadRole::SkillEntry)
+        );
+        let host = parts
+            .ctx
+            .get::<crate::types::resources::SharedResources>()
+            .expect("resources");
+        assert!(std::sync::Arc::ptr_eq(host.as_ref(), &toolset.resources));
+        assert!(!std::sync::Arc::ptr_eq(host.as_ref(), &incoming));
     }
     /// End-to-end: `FinalizedToolset` with `stream_tool_progress: true`
     /// produces `bash_output_chunk` Progress frames via `call_streaming`.

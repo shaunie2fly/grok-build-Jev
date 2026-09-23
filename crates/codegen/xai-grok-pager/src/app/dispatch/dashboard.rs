@@ -356,7 +356,6 @@ fn dispatch_dashboard_load_local_build(
     session_id: String,
     cwd_hint: Option<std::path::PathBuf>,
 ) -> Vec<Effect> {
-    use crate::views::dashboard::DashboardRowId;
     let resolved = cwd_hint
         .and_then(|cwd| {
             xai_grok_shell::session::resolve_local_session(&session_id, &cwd.to_string_lossy())
@@ -370,20 +369,28 @@ fn dispatch_dashboard_load_local_build(
         app.show_toast("Session not found locally");
         return vec![];
     };
+    dispatch_dashboard_load_session(app, resolved_id, Some(resolved_cwd))
+}
+fn dispatch_dashboard_load_session(
+    app: &mut AppView,
+    session_id: String,
+    session_cwd: Option<std::path::PathBuf>,
+) -> Vec<Effect> {
+    use crate::views::dashboard::DashboardRowId;
     #[cfg(feature = "local-workspace")]
     {
         app.welcome_history_load_as_build = true;
     }
-    if let Some(existing_id) = focus_if_session_already_open(app, resolved_id.as_str(), false) {
+    if let Some(existing_id) = focus_if_session_already_open(app, session_id.as_str(), false) {
         #[cfg(feature = "local-workspace")]
         {
             app.welcome_history_load_as_build = false;
         }
-        crate::app::workspace_sync::allow_loaded_session(app, &resolved_id);
+        crate::app::workspace_sync::allow_loaded_session(app, &session_id);
         log_dashboard_attached(&DashboardRowId::TopLevel(existing_id));
         return vec![];
     }
-    let effects = dispatch_load_session(app, resolved_id, Some(resolved_cwd), false);
+    let effects = dispatch_load_session(app, session_id, session_cwd, false);
     if let Some(new_id) = effects.iter().find_map(|effect| match effect {
         Effect::LoadSession { agent_id, .. } => Some(*agent_id),
         _ => None,
@@ -408,6 +415,9 @@ pub(super) fn dispatch_dashboard_pick_session(app: &mut AppView, index: usize) -
         return vec![];
     };
     let cwd_hint = (!entry.cwd.is_empty()).then(|| std::path::PathBuf::from(entry.cwd));
+    if crate::app::is_daemon_session_row(&entry.source) {
+        return dispatch_dashboard_load_session(app, entry.id, cwd_hint);
+    }
     dispatch_dashboard_load_local_build(app, entry.id, cwd_hint)
 }
 pub(super) fn dispatch_dashboard_attach(
@@ -1189,6 +1199,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
     let judgment_dynamic_reasoning_enabled_from_app = app.judgment_dynamic_reasoning_enabled;
     let judgment_distillation_enabled_from_app = app.judgment_distillation_enabled;
     let voice_stt_language_from_app = app.voice_config.language.clone();
+    let subagent_model_inheritance_from_app = app.subagent_model_inheritance;
     let result = {
         let Some(invocation) = parse_invocation(trimmed.as_str()) else {
             return vec![];
@@ -1279,6 +1290,7 @@ pub(super) fn dispatch_dashboard_dispatch_slash(app: &mut AppView, text: String)
                 judgment_dynamic_reasoning_enabled: judgment_dynamic_reasoning_enabled_from_app,
                 judgment_distillation_enabled: judgment_distillation_enabled_from_app,
                 voice_stt_language: voice_stt_language_from_app,
+                subagent_model_inheritance: subagent_model_inheritance_from_app,
             },
         };
         command.run(&mut ctx, invocation.args)

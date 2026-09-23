@@ -244,6 +244,7 @@ pub(crate) async fn spawn_session_actor(
     system_prompt_label: String,
     compaction_mode: xai_chat_state::CompactionMode,
     compaction_verbatim_input: bool,
+    long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder,
     compaction_tool_choice: crate::util::config::CompactionToolChoice,
     two_pass_enabled: bool,
     buffering_settings: Option<BufferingSettings>,
@@ -345,6 +346,14 @@ pub(crate) async fn spawn_session_actor(
     }
     let wf_sid: String = session_info.id.0.to_string();
     let (cmd_tx, cmd_rx) = mpsc::unbounded_channel();
+    let mut mcp_servers = mcp_servers;
+    if !startup_hints.is_subagent {
+        crate::session::agent_mcp::apply_agent_mcp_overlay(
+            &mut mcp_servers,
+            &agent_definition,
+            tool_context.cwd.as_path(),
+        );
+    }
     tracing::info!(
         "Session '{}' created with {} MCP servers",
         session_info.id.0,
@@ -602,6 +611,7 @@ pub(crate) async fn spawn_session_actor(
         query_params: sampling_config.query_params.clone(),
         env_http_headers: sampling_config.env_http_headers.clone(),
         context_window: context_window_override.unwrap_or(baseline_context_window),
+        max_request_bytes: sampling_config.max_request_bytes,
         reasoning_effort: sampling_config.reasoning_effort,
         reasoning_summary: sampling_config.reasoning_summary,
         stream_tool_calls: Some(sampling_config.stream_tool_calls),
@@ -1115,8 +1125,9 @@ pub(crate) async fn spawn_session_actor(
             },
         ))
     });
-    let mcp_state = {
+    let (mcp_state, admitted_mcp_servers) = {
         let mut state = McpState::new_with_meta(mcp_servers.clone(), mcp_meta_config_map);
+        let admitted_mcp_servers = state.admitted_servers();
         if let Some(ref pool) = parent_mcp_pool {
             state.import_shared_clients(pool);
             tracing::info!(
@@ -1137,7 +1148,7 @@ pub(crate) async fn spawn_session_actor(
                 "Registered in-process SDK MCP servers (x.ai/mcp/sdk_call)"
             );
         }
-        Arc::new(TokioMutex::new(state))
+        (Arc::new(TokioMutex::new(state)), admitted_mcp_servers)
     };
     let (plugin_registry_wait_timer, plugin_registry_wait_span) =
         spawn_await_step!("plugin_registry_wait");
@@ -1787,7 +1798,7 @@ pub(crate) async fn spawn_session_actor(
         deny_read_globs,
         mcp_state: mcp_state.clone(),
         mcp_strategy: std::cell::Cell::new(mcp_strategy),
-        initial_client_mcp_servers: initial_client_mcp_servers.clone(),
+        initial_client_mcp_servers: std::cell::RefCell::new(initial_client_mcp_servers.clone()),
         chat_state_handle,
         judgment_hook: std::sync::OnceLock::new(),
         unattributed_background_usage: std::sync::atomic::AtomicBool::new(false),
@@ -1824,6 +1835,8 @@ pub(crate) async fn spawn_session_actor(
             prefix_released: std::sync::atomic::AtomicBool::new(false),
             cancel: Default::default(),
         },
+        long_reasoning_reminder,
+        long_reasoning_turn_state: Default::default(),
         memory: super::memory_state::SessionMemory {
             configured_mode: memory_config.as_ref().map(|mc| mc.mode),
             v2_config: memory_config
@@ -2406,7 +2419,7 @@ pub(crate) async fn spawn_session_actor(
         gateway_enabled,
         emit_local_background_tasks,
         client_caps,
-        mcp_servers,
+        mcp_servers: admitted_mcp_servers,
         initial_client_mcp_servers,
         display_cwd: None,
         feedback_manager: feedback_manager.clone(),
@@ -2528,6 +2541,7 @@ pub(crate) async fn spawn_session_on_thread(
     system_prompt_label: String,
     compaction_mode: xai_chat_state::CompactionMode,
     compaction_verbatim_input: bool,
+    long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder,
     compaction_tool_choice: crate::util::config::CompactionToolChoice,
     two_pass_enabled: bool,
     buffering_settings: Option<BufferingSettings>,
@@ -2742,6 +2756,7 @@ pub(crate) async fn spawn_session_on_thread(
                     system_prompt_label,
                     compaction_mode,
                     compaction_verbatim_input,
+                    long_reasoning_reminder,
                     compaction_tool_choice,
                     two_pass_enabled,
                     buffering_settings,

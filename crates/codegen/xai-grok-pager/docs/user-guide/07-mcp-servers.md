@@ -392,6 +392,8 @@ See the [MCP Server Registry](https://github.com/modelcontextprotocol/servers) f
 
 ## Subagents and MCP
 
+When the same server name appears in both `config.toml` / `.mcp.json` and the active agent’s `mcpServers` frontmatter, **agent.md wins** (including HTTP headers). The overlay is re-applied on config hot-reload, plugin reload, and agent switch so a disk rematerialize cannot restore the toml headers. Switching agents replaces the overlay with the new seat only: servers the new agent omits are dropped, and an agent with no `mcpServers` clears the prior overlay.
+
 Subagents inherit the parent session’s connected MCP servers by default, including plugin-sourced agents. Use agent frontmatter `mcpInheritance` to restrict that set (`all`, `none`, `named`, or `except`). Details are in [Subagents — MCP inheritance](16-subagents.md#mcp-inheritance).
 
 If a child lists `search_tool` / `use_tool` but returns an empty catalog, check that:

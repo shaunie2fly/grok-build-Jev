@@ -1058,7 +1058,7 @@ fn unregister_best_effort_is_nonblocking_under_lock_contention() {
                 .expect("list")
                 .len(),
             1,
-            "contended unregister must leave the entry for collect_crashed",
+            "contended unregister must leave the entry for the next register to prune",
         );
 }
 /// A real I/O error (uncreatable registry root) is swallowed: the best-effort helper logs and returns instead of panicking.

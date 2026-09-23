@@ -229,6 +229,24 @@ impl GrokStdioClient {
         .await
     }
 
+    pub async fn prompt_send_now(
+        &self,
+        session_id: &acp::SessionId,
+        text: &str,
+    ) -> acp::Result<acp::PromptResponse> {
+        timed(
+            &self.process,
+            "prompt send-now",
+            self.turn_budget.unwrap_or(PROMPT_TIMEOUT),
+            self.connection.prompt_with_meta(
+                session_id,
+                text,
+                serde_json::json!({ "sendNow": true }),
+            ),
+        )
+        .await
+    }
+
     pub async fn load_session(
         &self,
         session_id: &acp::SessionId,

@@ -2312,6 +2312,22 @@ pub(crate) fn execute(
                     }
                 });
         }
+        Effect::PersistFeatureOverride { feature, saved } => {
+            tasks
+                .spawn(async move {
+                    let result = xai_grok_shell::util::config::set_feature_override(
+                            feature,
+                            saved,
+                        )
+                        .await
+                        .map(|()| saved)
+                        .map_err(|e| e.to_string());
+                    TaskResult::FeatureOverridePersisted {
+                        feature,
+                        result,
+                    }
+                });
+        }
         Effect::Authenticate {
             request_seq,
             method_id,

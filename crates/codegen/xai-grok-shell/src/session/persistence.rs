@@ -88,6 +88,40 @@ pub fn sanitize_rename_title(title: &str) -> Cow<'_, str> {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ValidatedRenameTitle {
+    Manual(String),
+    ResetToAuto,
+}
+
+/// Applies the shared `x.ai/session/rename` title boundary.
+pub fn validate_rename_title(
+    title: &str,
+    reset_to_auto: bool,
+) -> Result<ValidatedRenameTitle, acp::Error> {
+    if reset_to_auto {
+        if !sanitize_rename_title(title).is_empty() {
+            return Err(
+                acp::Error::invalid_request().data("title must be empty when resetToAuto is set")
+            );
+        }
+        return Ok(ValidatedRenameTitle::ResetToAuto);
+    }
+    if title.len() > MAX_TITLE_BYTES {
+        return Err(acp::Error::invalid_request().data("title too large"));
+    }
+    let title = sanitize_rename_title(title).into_owned();
+    if title.is_empty() {
+        return Err(acp::Error::invalid_request().data("title must not be blank"));
+    }
+    if title.chars().count() > MAX_TITLE_SCALARS {
+        return Err(acp::Error::invalid_request().data(format!(
+            "title too long (max {MAX_TITLE_SCALARS} characters after removing control characters)"
+        )));
+    }
+    Ok(ValidatedRenameTitle::Manual(title))
+}
+
 /// Sanitize then cap. `None` when the result is blank.
 /// Overlong titles are truncated (ingest/pull defense); the ext rename path rejects instead.
 pub fn sanitize_and_cap_title(title: &str) -> Option<String> {

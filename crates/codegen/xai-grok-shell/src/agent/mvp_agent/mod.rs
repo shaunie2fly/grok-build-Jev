@@ -9,7 +9,8 @@ use std::{
 use tokio::sync::mpsc;
 /// A `'static` reference to a value on a single-threaded `LocalSet`. Encapsulates the raw-pointer pattern used when `spawn_local` tasks need `&T` but the borrow checker requires `'static`.
 /// The pointer is valid as long as: `T` is heap-allocated and never moved (e.g., behind `Rc` or owned by the ACP connection for the process lifetime). All access happens on the **same** `LocalSet` thread (no `Send`).
-/// The `LocalRef` does not outlive the `LocalSet`. These invariants are upheld by construction. `LocalRef` is `!Send` (via `*const T`) and is only used inside `spawn_local` closures on the agent's `LocalSet`.
+/// The `LocalRef` does not outlive the `LocalSet`. `LocalRef` is `!Send` (via `*const T`) and is only used inside `spawn_local` closures on the agent's `LocalSet`.
+/// Every entrypoint that builds a `MvpAgent` must hold an `Rc` to it, declared before the `LocalSet`, so the agent outlives every task on the set on normal exit and unwind alike.
 pub(crate) struct LocalRef<T> {
     ptr: *const T,
 }
@@ -559,6 +560,10 @@ struct SettingsUpdateNotification {
     subscription_watch_interval_secs: Option<u64>,
     dock_enabled: Option<bool>,
     terminal_theme_enabled: Option<bool>,
+    /// The remote tier the pager's settings row shows beside the saved `[features]` key.
+    /// Omitted while the agent has no settings (the pager keeps the tier it seeded itself); `null` once fetched settings lack the key.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    subagent_model_inheritance_enabled: Option<Option<bool>>,
 }
 /// When the announcements push gate emits despite an unchanged visible list.
 #[derive(Clone, Copy, Debug)]
@@ -1871,6 +1876,10 @@ impl MvpAgent {
                     .and_then(|s| s.subscription_watch_interval_secs),
                 dock_enabled: rs.and_then(|s| s.dock_enabled),
                 terminal_theme_enabled: rs.and_then(|s| s.terminal_theme_enabled),
+                subagent_model_inheritance_enabled: rs
+                    .map(|s| {
+                        config::Feature::SubagentModelInheritance.remote_value(Some(s))
+                    }),
             }
         };
         if let Ok(params) = serde_json::value::to_raw_value(&payload) {

@@ -1325,13 +1325,13 @@ pub(crate) async fn run(
     let requirements = xai_grok_shell::config::load_merged_requirements();
     let user_config = xai_grok_shell::config::load_from_disk().ok();
     let managed_config = xai_grok_shell::config::load_managed_config().ok();
-    let effective_config = {
+    let (config_layers, effective_config) = {
         let _t = xai_grok_telemetry::instrumentation::timer("startup.app_init.effective_config");
-        match xai_grok_shell::config::load_effective_config() {
-            Ok(raw) => Some(raw),
+        match xai_grok_shell::config::load_effective_config_with_layers() {
+            Ok((layers, raw)) => (Some(layers), Some(raw)),
             Err(e) => {
                 tracing::debug!(error = %e, "failed to load effective config, using partial layers");
-                None
+                (None, None)
             }
         }
     };
@@ -1363,6 +1363,11 @@ pub(crate) async fn run(
         requirements.as_ref(),
         user_config.as_ref(),
         managed_config.as_ref(),
+        remote_settings.as_ref(),
+    );
+    app.subagent_model_inheritance = crate::settings::FeatureOverrideState::from_layers(
+        xai_grok_shell::agent::config::Feature::SubagentModelInheritance,
+        config_layers.as_ref(),
         remote_settings.as_ref(),
     );
     app.subscription_watch_interval_secs = remote_settings

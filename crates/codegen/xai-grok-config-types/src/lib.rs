@@ -54,6 +54,20 @@ pub struct DoomLoopRecoverySettings {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub window_tokens: Option<u32>,
 }
+/// Shared shape of the `[long_reasoning_reminder]` TOML table and the remote `long_reasoning_reminder` object; unset fields fall through per field.
+#[derive(Debug, Clone, Default, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct LongReasoningReminderSettings {
+    /// Mid-turn reminder to reason briefly after a long hidden-reasoning call; default off.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// Reasoning tokens in one model call that count as a long step; absent uses the client default (1000).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tokens: Option<u32>,
+    /// Model calls to wait after the long step before the reminder is injected; absent uses the client default (1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub delay: Option<u32>,
+}
 /// Per-kind age policy for auto-GC: seconds or never.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum WorktreeKindMaxAge {
@@ -740,6 +754,9 @@ pub struct RemoteSettings {
     /// `GROK_TERMINAL_THEME` overrides it locally.
     #[serde(default)]
     pub terminal_theme_enabled: Option<bool>,
+    /// Remote `long_reasoning_reminder` object; see [`LongReasoningReminderSettings`].
+    #[serde(default, deserialize_with = "deserialize_tolerant")]
+    pub long_reasoning_reminder: Option<LongReasoningReminderSettings>,
     /// Whether ZDR (Zero Data Retention) users are allowed to use the product.
     /// The default is `false` (blocked) during beta.
     #[serde(default)]
@@ -774,7 +791,6 @@ pub struct RemoteSettings {
     /// It also merges back-to-back edits to the same file into one row (expand for the diffs).
     /// `None` defers to local config, env, then the default (`false`); `Some(false)` is a remote kill switch.
     /// `resolve_collapsed_edit_blocks` resolves it: requirements, env, user, managed, remote, then the default (false).
-    /// Explicit pager.toml `[scrollback.blocks.edit]` shape keys override the flag's fold shape client-side; merging always follows the flag.
     #[serde(default)]
     pub collapsed_edit_blocks: Option<bool>,
     /// Display-refresh probe and auto-cadence. See [`DisplayRefreshSettings`].

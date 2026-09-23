@@ -392,6 +392,12 @@ async fn create_test_actor_inner(
             prefix_released: std::sync::atomic::AtomicBool::new(false),
             cancel: Default::default(),
         },
+        long_reasoning_reminder: crate::session::long_reasoning_reminder::LongReasoningReminder {
+            enabled: false,
+            tokens: crate::session::long_reasoning_reminder::DEFAULT_TOKENS,
+            delay: crate::session::long_reasoning_reminder::DEFAULT_DELAY,
+        },
+        long_reasoning_turn_state: Default::default(),
         memory: crate::session::memory_state::SessionMemory {
             configured_mode: None,
             v2_config: Default::default(),
@@ -492,7 +498,7 @@ async fn create_test_actor_inner(
         pending_classifier_completions: parking_lot::Mutex::new(std::collections::VecDeque::new()),
         goal_classifier_in_flight: std::sync::atomic::AtomicBool::new(false),
         managed_mcp_handle: Default::default(),
-        initial_client_mcp_servers: vec![],
+        initial_client_mcp_servers: Default::default(),
         tool_metadata_snapshot: Arc::new(std::sync::Mutex::new(Default::default())),
         mcp_announcements: Default::default(),
         mcp_reminder_mode: McpReminderMode::Delta,
@@ -740,7 +746,7 @@ pub(crate) async fn prepare_call(
     let mut deferred = Vec::new();
     tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        actor.prepare_tool_call(call, &mut deferred),
+        actor.prepare_tool_call(call, &mut deferred, None),
     )
     .await
     .expect("prepare_tool_call must not hang")

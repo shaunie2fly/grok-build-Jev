@@ -470,6 +470,11 @@ pub enum Action {
     /// Jev output distillation. SHELL-owned; persisted to `[judgment].distill_outputs`.
     /// Applies to new sessions.
     SetJudgmentDistillationEnabled(bool),
+    /// Save `[features].subagent_model_inheritance` as an explicit override. SHELL-owned; agents latch it when built, so it applies on restart.
+    SetSubagentModelInheritance(bool),
+    /// Delete the saved `[features].subagent_model_inheritance` key so the remote setting or the default applies again.
+    /// The reset path uses this instead of writing the compiled default.
+    ClearSubagentModelInheritance,
     /// SHELL-owned `keep_text_selection` (`flash` | `hold`); cache and persist.
     SetKeepTextSelection(crate::appearance::TextSelection),
     /// Set the mouse-wheel scroll speed multiplier (1-100).
@@ -955,8 +960,6 @@ pub enum Action {
     RewindCancelOffer,
     RewindDismiss,
     RewindDismissError,
-    /// Submit an inline edit: conversation-only rewind to that prompt, then resubmit the edited text (state lives on `AgentView::inline_edit`).
-    InlineEditSubmit,
     /// Open the `/jump` turn picker.
     JumpShowPicker,
     /// Jump to a turn by its prompt's stable id and close the picker.
@@ -1683,6 +1686,12 @@ pub enum Effect {
         value: crate::settings::SettingValue,
         rollback_value: crate::settings::SettingValue,
     },
+    /// Write the user `[features]` key of `feature`, or delete it for `saved == None`; completes as
+    /// [`TaskResult::FeatureOverridePersisted`]. A row issues one of these at a time so the disk follows toggle order.
+    PersistFeatureOverride {
+        feature: xai_grok_shell::agent::config::Feature,
+        saved: Option<bool>,
+    },
     /// Toggle mouse reporting off and on to unwedge xterm.js's button tracker
     /// (see `AgentView::reset_wedged_mouse_reporting`). An effect so it rides the escape
     /// writer; `process_effects` re-checks capture so a toggle-off in the same batch wins.
@@ -2090,8 +2099,8 @@ pub enum Effect {
     },
     /// Clear the auth copy feedback after a delay if its generation is still current.
     ScheduleClearAuthCopyFeedback { generation: u64 },
-    /// Register the current session in the active-sessions crash-recovery
-    /// registry (`~/.grok/active_sessions.json`).
+    /// Register the current session in the active-session registry
+    /// (`~/.grok/active_sessions.json`).
     RegisterActiveSession {
         session_id: acp::SessionId,
         cwd: String,
@@ -3217,6 +3226,11 @@ pub enum TaskResult {
     SettingPersistFailedBestEffort {
         key: crate::settings::SettingKey,
         error: String,
+    },
+    /// One [`Effect::PersistFeatureOverride`] write finished; `Ok` carries what it left on disk.
+    FeatureOverridePersisted {
+        feature: xai_grok_shell::agent::config::Feature,
+        result: Result<Option<bool>, String>,
     },
     /// Off-thread clipboard attachment probe finished (see [`Effect::ProbeClipboardAttachment`]); dispatch attaches the chip.
     ClipboardAttachmentProbed {
