@@ -36,9 +36,9 @@ fn partial_table_fills_every_unset_field_from_the_documented_default() {
     let partial: JudgmentConfig = toml::from_str("enabled = true\n").unwrap();
     assert!(partial.enabled);
     assert_eq!(partial.endpoint, "https://api.typesafe.ai/v1/systemone");
-    assert_eq!(partial.timeout_ms, 400);
+    assert_eq!(partial.timeout_ms, 1500);
     assert_eq!(partial.distill_line_threshold, 40);
-    assert_eq!(partial.safety_threshold, 0.20);
+    assert_eq!(partial.safety_threshold, 0.08);
     assert_eq!(partial.api_key, None);
     // UI-exposed levers default ON so `[judgment] enabled = true` alone matches the Settings
     // modal: toggling the master switch produces the documented feature set.
@@ -95,4 +95,23 @@ fn configured_values_round_trip_through_toml() {
         toml::from_str::<JudgmentConfig>(&serialized).unwrap(),
         config
     );
+}
+
+/// The default request budget must clear the endpoint's real latency, not just its happy path.
+///
+/// Measured against the live Jev endpoint: p50 ~465 ms, p95 ~568 ms, p99 ~631 ms warm, with cold
+/// calls near 1200 ms. A 400 ms budget expired on 20/20 observed calls, which disabled every
+/// subsystem while still looking configured — a silent failure with no signal to the user. This
+/// test pins the default above the measured p99 so that regression cannot recur unnoticed.
+#[test]
+fn the_default_timeout_clears_the_measured_endpoint_latency() {
+    let default = JudgmentConfig::default().timeout_ms;
+    const MEASURED_P99_MS: u64 = 631;
+    assert!(
+        default >= MEASURED_P99_MS,
+        "default {default} ms is below the measured p99 ({MEASURED_P99_MS} ms): most calls would time out"
+    );
+    // It should also round-trip through serde, since a partial `[judgment]` table is the common case.
+    let partial: JudgmentConfig = toml::from_str("enabled = true\n").unwrap();
+    assert_eq!(partial.timeout_ms, default);
 }

@@ -1056,28 +1056,59 @@ impl SessionActor {
     /// Gated on `[judgment] enabled + dynamic_thinking`. Every failure path (no hook, no prompt,
     /// timeout, HTTP error, malformed body) leaves the configured effort untouched, so vanilla
     /// behavior is the floor rather than something a judgment outage can regress.
+    ///
+    /// Each early return is logged. They were silent, which made "S1 never fired" indistinguishable
+    /// from "S1 fired and Jev said nothing": diagnosing a live session meant reading every gate.
     pub(crate) async fn apply_dynamic_reasoning_effort(
         &self,
         sampler_config: &mut xai_grok_sampler::SamplerConfig,
     ) {
         if self.startup_hints.is_subagent {
+            // Expected on every child turn: the spawn-time effort (Subsystem 2) is authoritative.
+            tracing::debug!(
+                session_id = %self.session_info.id.0,
+                "judgment: dynamic reasoning skipped (subagent session keeps spawn-time effort)"
+            );
             return;
         }
         let Some(hook) = self.judgment_hook() else {
+            tracing::debug!(
+                session_id = %self.session_info.id.0,
+                "judgment: dynamic reasoning skipped (no hook: section absent, disabled, or no credential)"
+            );
             return;
         };
         if !hook.dynamic_thinking_enabled() {
+            tracing::debug!(
+                session_id = %self.session_info.id.0,
+                "judgment: dynamic reasoning skipped (dynamic_thinking lever is off)"
+            );
             return;
         }
         let Some(prompt) = self.chat_state_handle.get_last_user_query_text().await else {
+            tracing::debug!(
+                session_id = %self.session_info.id.0,
+                "judgment: dynamic reasoning skipped (no user query text in the conversation yet)"
+            );
             return;
         };
         if prompt.trim().is_empty() {
+            tracing::debug!(
+                session_id = %self.session_info.id.0,
+                "judgment: dynamic reasoning skipped (user query text is blank)"
+            );
             return;
         }
         let offered = self
             .models_manager
             .offered_reasoning_effort_values(&sampler_config.model);
+        tracing::debug!(
+            session_id = %self.session_info.id.0,
+            model = %sampler_config.model,
+            offered = ?offered,
+            prompt_len = prompt.len(),
+            "judgment: consulting Jev for dynamic reasoning effort"
+        );
         let Some(effort) = hook
             .evaluator()
             .classify_reasoning(&prompt, None, &offered)

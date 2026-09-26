@@ -265,9 +265,9 @@ fn parses_judgment_table_and_defaults_to_none_when_absent() {
     assert!(judgment.gate_tools);
     // Unset keys still resolve to the documented defaults, not empty/zero values.
     assert_eq!(judgment.endpoint, "https://api.typesafe.ai/v1/systemone");
-    assert_eq!(judgment.timeout_ms, 400);
+    assert_eq!(judgment.timeout_ms, 1500);
     assert_eq!(judgment.distill_line_threshold, 40);
-    assert_eq!(judgment.safety_threshold, 0.20);
+    assert_eq!(judgment.safety_threshold, 0.08);
     assert!(
         cfg.config_warnings.is_empty(),
         "every judgment key is a declared field: {:?}",

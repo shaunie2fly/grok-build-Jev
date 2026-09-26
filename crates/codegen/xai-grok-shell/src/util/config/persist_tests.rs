@@ -1901,7 +1901,7 @@ fn a_partial_judgment_section_fills_defaults() {
         "unset UI lever defaults on so enabling the master switch distills"
     );
     assert!(judgment.dynamic_thinking);
-    assert_eq!(judgment.timeout_ms, 400);
+    assert_eq!(judgment.timeout_ms, 1500);
     assert_eq!(judgment.endpoint, "https://api.typesafe.ai/v1/systemone");
     assert_eq!(judgment.distill_line_threshold, 40);
 }

@@ -381,6 +381,25 @@ async fn tool_safety_gating_honors_the_configured_threshold() {
     }
 }
 
+/// The schema default threshold must stay below the score of genuinely destructive commands.
+///
+/// Measured on the live Jev endpoint (n=12 per command): benign commands score 0.02–0.07 while
+/// destructive ones score 0.10–0.59, with no overlap. The default is what a Settings-modal
+/// opt-in installs, so it must not sit inside the destructive band — the previous 0.20 let
+/// `dd if=/dev/zero of=…` (0.10) and `chown -R root:root …` (0.16) through without asking.
+#[test]
+fn the_default_threshold_sits_below_the_measured_destructive_band() {
+    let default = xai_grok_config::JudgmentConfig::default().safety_threshold;
+    assert!(
+        default > 0.07,
+        "default {default} would ask the user to re-approve ordinary benign commands"
+    );
+    assert!(
+        default <= 0.10,
+        "default {default} would auto-approve commands measured as destructive (lowest observed 0.10)"
+    );
+}
+
 /// The threshold comparison is exclusive: a risk exactly equal to an exactly representable
 /// threshold counts as unsafe, so a call can never be auto-approved at the configured limit.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

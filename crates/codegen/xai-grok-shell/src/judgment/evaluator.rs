@@ -63,6 +63,12 @@ impl JudgmentEvaluator {
         offered: &[ReasoningEffort],
     ) -> Option<&'static str> {
         if offered.is_empty() {
+            // Not an error, but silence here is indistinguishable from a Jev outage in the logs:
+            // the caller sees the same `None` and keeps the configured effort. Say why.
+            warn!(
+                "Jev reasoning classification skipped: model offers no reasoning-effort menu; \
+                 keeping configured effort"
+            );
             return None;
         }
         // An explore subagent only reads and reports, so its effort is the cheapest menu row

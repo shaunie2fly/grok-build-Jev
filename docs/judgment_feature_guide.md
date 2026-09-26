@@ -112,7 +112,7 @@ To protect user systems, AI coding tools prompt users to approve bash commands a
 #### What Judgment Does
 Before presenting an approval dialog, Judgment submits the tool name and command string to Jev's `is_destructive` evaluator:
 - Evaluates whether the operation is destructive, drops database state, or deletes uncommitted work outside the repository workspace.
-- **Safe Commands Auto-Approved:** Read-only inspections, test runs, and harmless commands with a risk score below the threshold (default: $0.20$) are approved automatically.
+- **Safe Commands Auto-Approved:** Read-only inspections, test runs, and harmless commands with a risk score below the threshold (default: $0.08$) are approved automatically.
 - **Destructive Commands Prompted:** Destructive operations (`rm -rf`, `git reset --hard`, `git clean -fdx`, `drop database`) receive high risk scores ($0.95+$) and **always** trigger the manual user approval dialog.
 - **Fail-Closed Invariant:** Any error, timeout, or ambiguous classification immediately falls back to prompting the user for approval.
 
@@ -276,9 +276,11 @@ api_key = "env:TYPESAFE_API_KEY"
 # System One endpoint. Default: "https://api.typesafe.ai/v1/systemone"
 endpoint = "https://api.typesafe.ai/v1/systemone"
 
-# Per-request network timeout in milliseconds. Default: 2500 (2.5 seconds).
-# If a request exceeds this duration, it immediately aborts and falls back safely.
-timeout_ms = 2500
+# Per-request network timeout in milliseconds. Default: 1500 (1.5 seconds).
+# The schema default is 1500 ms: measured p99 on the live endpoint is ~630 ms, but cold
+# calls have been observed near 1200 ms, and a budget that expires on every call silently
+# disables every subsystem. If a request exceeds this duration it is aborted and falls back.
+timeout_ms = 1500
 
 # ---------------------------------------------------------------------------
 # UI-Exposed Subsystems (Default to true when enabled = true)
@@ -295,9 +297,9 @@ distill_line_threshold = 40
 # Subsystem 3: Auto-approve safe tool calls (read-only bash, file status, inspections)
 gate_tools = true
 
-# Maximum risk probability allowed for auto-approval (0.0 to 1.0). Default: 0.20.
-# Any command with an estimated risk >= 0.20 prompts the user.
-safety_threshold = 0.20
+# Maximum risk probability allowed for auto-approval (0.0 to 1.0). Default: 0.08.
+# Any command with an estimated risk >= 0.08 prompts the user.
+safety_threshold = 0.08
 
 # ---------------------------------------------------------------------------
 # Advanced & Experimental Subsystems (Default to false)

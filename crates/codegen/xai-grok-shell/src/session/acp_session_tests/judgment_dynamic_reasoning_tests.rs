@@ -120,3 +120,45 @@ async fn parent_session_still_classifies_when_dynamic_thinking_is_on() {
         })
         .await;
 }
+
+/// A turn with no committed user query must skip S1 without spending a Jev call.
+///
+/// This is the observed shape of internal turns (subagent bookkeeping, continuations): the
+/// conversation has no `User` item when `prepare_sampler_for_turn` runs, so
+/// `get_last_user_query_text()` is `None` and the effort stays as configured. It is *correct*
+/// behavior, but it was silent — a live session could not distinguish it from "S1 is broken".
+/// Pin the behavior so a future change that starts classifying on those turns is caught here.
+#[tokio::test(flavor = "current_thread")]
+async fn a_turn_without_a_user_query_skips_classification_without_calling_jev() {
+    let local = tokio::task::LocalSet::new();
+    local
+        .run_until(async {
+            let (endpoint, seen) = serve(score_answer(3.0)).await;
+            let actor = plain_actor().await;
+            seed_thinking_model(&actor, "effort-model");
+            // Deliberately no `push_user_message`: the conversation has no user turn yet.
+            assert!(
+                actor.judgment_hook.set(Some(hook(&endpoint))).is_ok(),
+                "hook set once"
+            );
+
+            let mut config = xai_grok_sampler::SamplerConfig {
+                model: "effort-model".to_owned(),
+                reasoning_effort: Some(ReasoningEffort::High),
+                context_window: 256_000,
+                ..Default::default()
+            };
+            actor.apply_dynamic_reasoning_effort(&mut config).await;
+
+            assert_eq!(
+                config.reasoning_effort,
+                Some(ReasoningEffort::High),
+                "with no user query the configured effort must survive untouched"
+            );
+            assert!(
+                seen.lock().is_empty(),
+                "no user query ⇒ no TypeSafe call (this turn was correctly skipped)"
+            );
+        })
+        .await;
+}
