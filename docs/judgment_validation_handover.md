@@ -524,3 +524,218 @@ The honest headline: the two numeric defaults are well-evidenced at the API leve
 tested and deployed; the **in-product behavioural proof of the safety gate is missing**, and the
 **first-turn S1 skip is open**. If you only have time for one thing, re-derive §4.2 — it is the
 claim with the largest blast radius (it governs whether destructive commands run without asking).
+
+---
+
+## 12. How the reasoning-effort level is selected (Subsystem 1)
+
+§2 established *that* S1 fires and applies a verdict. This section documents *how* the level is
+chosen, because the mechanism is the part most likely to be misunderstood and it is the subsystem
+with the largest ongoing effect on cost and latency.
+
+### 12.1 The pipeline, in order
+
+Entry point: `apply_dynamic_reasoning_effort`
+(`crates/codegen/xai-grok-shell/src/session/acp_session_impl/sampler_turn.rs:1062`), called from
+`prepare_sampler_for_turn` once per turn, before the sampler request is built.
+
+```
+1. gate 1: startup_hints.is_subagent          → skip (child keeps spawn-time effort)
+2. gate 2: judgment_hook()                    → skip (no section / disabled / no credential)
+3. gate 3: dynamic_thinking_enabled()         → skip (lever off; needs enabled AND dynamic_thinking)
+4. read the prompt: get_last_user_query_text()→ skip if None          (see §6.1: first turn)
+5. skip if prompt.trim().is_empty()
+6. build `offered` = the ACTIVE MODEL's thinking menu
+7. Jev call: classify_reasoning(prompt, None, &offered)
+8. map score → one of `offered`
+9. effort.parse::<ReasoningEffort>() → sampler_config.reasoning_effort = Some(parsed)
+```
+
+Every skip leaves the configured effort untouched (fail-open). Steps 1–5 are the silent early returns
+made observable by this work (§2 defect 3).
+
+### 12.2 Step 6 — `offered` is per-model, and that is the point
+
+`offered` comes from `ModelsManager::offered_reasoning_effort_values(model)`
+(`crates/codegen/xai-grok-shell/src/agent/remote_config/manager/mod.rs`), resolved as:
+
+1. `model_supports_reasoning_effort(model)` false → **empty list** ⇒ S1 skips (no Jev call).
+2. Otherwise use the catalog's `reasoning_efforts` values for that model.
+3. If the catalog list is empty but the model supports effort → fall back to `[low, medium, high, xhigh]`.
+
+Measured from the live catalog (`~/.grok/models_cache.json`, the `reasoning_efforts` array):
+
+| Model | Menu | Levels |
+|---|---|---|
+| `grok-4.7` | `xhigh, high, medium, low` | 4 |
+| `grok-4.7-build-fast` | `xhigh, high, medium, low` | 4 |
+| `grok-4.6` | `xhigh, high, medium, low` | 4 |
+| `grok-4.5` | `high, medium, low` (**no xhigh**) | 3 |
+
+So the same prompt can yield a different level on a different model — by design. This is the
+"align effort labels to the model's thinking settings" property: Jev returns a *difficulty*, not a
+level name; the level is always an element of the active model's menu.
+
+### 12.3 Step 7 — what Jev is asked
+
+```json
+{"complexity": {"type": "score",
+  "instructions": "Evaluate the cognitive difficulty of this task.",
+  "criteria": [ 4 level descriptions, 0=Trivial … 3=Complex ]}}
+```
+
+Jev returns `answers.complexity.score` as a **probability-weighted mean of the 4 criterion indices**,
+so the raw value spans **0.00 – 3.00** (not 0–1). `normalized_score` divides by `SCORE_MAX_INDEX = 3.0`
+and clamps to 0..1. Getting this scale wrong is the single most likely way to break the mapping —
+if you see a score like `3.0`, that is the raw value, not a bug.
+
+### 12.4 Step 8 — the mapping (exact, derived and live-checked)
+
+Levels are sorted **cheapest-first** by `effort_intensity`
+(`none=0, minimal=1, low=2, medium=3, high=4, xhigh=5, max=6`), deduplicated, then banded in
+**equal-width bands**:
+
+```rust
+let idx = ((score.clamp(0.0, 1.0) * n as f64) as usize).min(n - 1);   // n = |offered|
+ordered.get(idx)
+```
+
+Note the `.min(n - 1)`: the top band is closed at the top so `score = 1.0` lands on the strongest
+level. Resulting bands (the last row in each band column is the boundary — `0.250` is the *first*
+`medium`, and 0.249 still maps to `low`):
+
+**4-level menu — `grok-4.7`, `grok-4.7-build-fast`, `grok-4.6`:**
+
+| Effort | normalized | raw score (0–3) |
+|---|---|---|
+| `low` | 0.000 – 0.249 | 0.00 – 0.75 |
+| `medium` | 0.250 – 0.499 | 0.75 – 1.50 |
+| `high` | 0.500 – 0.749 | 1.50 – 2.25 |
+| `xhigh` | 0.750 – 1.000 | 2.25 – 3.00 |
+
+**3-level menu — `grok-4.5`:**
+
+| Effort | normalized | raw score (0–3) |
+|---|---|---|
+| `low` | 0.000 – 0.333 | 0.00 – 1.00 |
+| `medium` | 0.334 – 0.666 | 1.00 – 2.00 |
+| `high` | 0.667 – 1.000 | 2.00 – 3.00 |
+
+**Singleton menu (e.g. only `high`):** everything maps to that single level. An `explore` subagent
+takes the cheapest row directly, with no Jev call (`cheapest_offered_effort`).
+
+### 12.5 Live verification of the whole chain
+
+Measured against the live endpoint, mapped through the 4-level menu:
+
+| Prompt | Raw | Norm | → effort |
+|---|---|---|---|
+| `bump the version` | 0.31 | 0.103 | `low` |
+| `why does this test fail` | 0.72 | 0.240 | `low` |
+| `add a --verbose flag to the CLI` | 1.06 | 0.353 | `medium` |
+| `audit RLS policies for tenant isolation` | 2.05 | 0.683 | `high` |
+| `refactor the auth module across 6 files` | 2.19 | 0.730 | `high` |
+| `implement a lock-free work-stealing scheduler with ABA-safe reclamation` | 3.00 | 1.000 | `xhigh` |
+
+Monotonic in difficulty, and the extremes are exact (`3.00 → xhigh`). **Reproduce this yourself — it
+is the cheapest way to validate the whole subsystem** (§12.7).
+
+### 12.6 What is NOT part of effort selection
+
+- **`confidence` is ignored.** Jev returns `answers.complexity.confidence`; the code never reads it.
+  A low-confidence score is applied exactly as a high-confidence one.
+- **`subagent_type` is sent but only special-cased for `"explore"`.** For other subagent types the
+  value is passed to Jev in `state` but does not alter the mapping.
+- **The parent call passes `subagent_type = None`** — `apply_dynamic_reasoning_effort` is parent-only
+  (§12.1 gate 1), so a subagent's own type never reaches Jev on a parent turn.
+- **Subagent effort is a separate path** (`apply_dynamic_subagent_effort`,
+  `crates/codegen/xai-grok-shell/src/agent/subagent/mod.rs`), gated on `dynamic_subagent_thinking`
+  (**default false**), with precedence: explicit spawn override > explore pin > Jev. The child then
+  never re-classifies, because gate 1 skips it.
+- **Model-id routing is not applied on the S1 path.** S2 uses `apply_supported_effort`, which also
+  swaps `sampling.model` via `model_for_effort` when a model has per-effort `variants`. S1 sets
+  `reasoning_effort` directly. All four live models have `variants: None`, so this is currently a
+  no-op — see §5 trap 7 before treating it as a bug.
+
+### 12.7 Validation procedure for this section
+
+```sh
+cd /mnt/data/repos/grok-build-Jev
+# (a) the mapping boundaries, exactly: these tests must pass unchanged.
+cargo test -p xai-grok-shell --lib -j 8 -- \
+  'judgment::evaluator::tests::score_bands' \
+  'judgment::evaluator::tests::explore_pin' \
+  'judgment::evaluator::tests::explore_pins_the_only_offered_level'
+
+# (b) the live end-to-end chain. A fresh session's FIRST turn skips S1 (§6.1), so this MUST be
+#     a two-turn session; a single `--single` turn will legitimately log a skip and look broken.
+rm -rf /tmp/vfy && mkdir -p /tmp/vfy/grok /tmp/vfy/work
+cp ~/.grok/auth.json /tmp/vfy/grok/ && chmod 600 /tmp/vfy/grok/auth.json
+cp ~/.grok/config.toml /tmp/vfy/grok/          # real key + real endpoint
+```
+
+Save this as `/tmp/vfy/two_turn.py` and run it — it drives `grok agent stdio` over ACP, sending
+two prompts and reading the JSON-RPC replies from stdout:
+
+```python
+#!/usr/bin/env python3
+import json, os, subprocess, threading, time
+GROK, HOME = "/home/shaun/.grok/bin/grok", "/tmp/vfy/grok"
+p = subprocess.Popen([GROK, "agent", "stdio"], stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+                     stderr=open("/tmp/vfy/acp.err", "w"), text=True, bufsize=1,
+                     env=dict(os.environ, GROK_HOME=HOME, RUST_LOG="debug"), cwd="/tmp/vfy/work")
+msgs = []
+threading.Thread(target=lambda: [msgs.append(json.loads(l)) for l in p.stdout if l.strip()],
+                 daemon=True).start()
+def send(o): p.stdin.write(json.dumps(o) + "\n"); p.stdin.flush()
+def wait(i, t=150):
+    end = time.time() + t
+    while time.time() < end:
+        for m in msgs:
+            if m.get("id") == i: return m
+        time.sleep(0.2)
+send({"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1,
+  "clientCapabilities":{"fs":{"readTextFile":False,"writeTextFile":False},"terminal":False,
+  "auth":{"terminal":False}},"_meta":{"clientType":"probe","clientVersion":"1.0",
+  "startupHints":{"nonInteractive":False}}}})
+wait(1, 60)
+send({"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp/vfy/work","mcpServers":[]}})
+sid = wait(2, 60)["result"]["sessionId"]
+for i, text in ((3, "hello, what is this workspace?"),
+                (4, "refactor the auth module across 6 files")):
+    send({"jsonrpc":"2.0","id":i,"method":"session/prompt",
+          "params":{"sessionId":sid,"prompt":[{"type":"text","text":text}]}})
+    wait(i)
+p.terminate()
+```
+
+```sh
+cd /tmp/vfy/work && python3 /tmp/vfy/two_turn.py
+grep -oE 'judgment: consulting Jev[^"]*' /tmp/vfy/acp.err   # expect offered=[Xhigh, High, Medium, Low]
+python3 -c "import json;[print(json.loads(l)['ctx']) for l in open('/tmp/vfy/grok/logs/unified.jsonl') if 'applied' in l]"
+#   expect {'effort': 'high'} for that prompt on a 4-level model
+rm -rf /tmp/vfy        # contains a copy of your auth token
+```
+
+**Verified observation (do not accept a different shape without investigating):**
+
+```
+3 judgment: consulting Jev for dynamic reasoning effort  … offered=[Xhigh, High, Medium, Low] prompt_len=39
+3 judgment: dynamic reasoning skipped (no user query text in the conversation yet)
+3 judgment.dynamic_reasoning.applied {'effort': 'high'}
+```
+
+The prompt `refactor the auth module across 6 files` scores raw ≈2.19 (§12.5) → normalized 0.730 →
+the `high` band (0.500–0.749) on a 4-level menu. **A correct implementation must reproduce `high`
+for that prompt.** If it does not, either the model's menu changed (re-read `models_cache.json`) or
+the mapping in §12.4 has drifted.
+
+**Pass criteria for §12:**
+- the three mapping tests pass with no edits to them;
+- a non-trivial prompt produces `judgment.dynamic_reasoning.applied` with an effort that is a member
+  of the model's `reasoning_efforts` list;
+- the raw score from a direct API call (§4) lands in the band that predicts the applied level.
+
+**If you want to falsify the mapping:** call the API directly for a prompt, compute
+`int(norm * n)` yourself from the table in §12.4, and check the engine agrees. A mismatch means
+either the menu changed (re-read `models_cache.json`) or the mapping drifted.
