@@ -243,7 +243,8 @@ impl crate::types::tool_metadata::ToolMetadata for GrepTool {
 - Pass ${{ params.search.pattern }} as a raw regex string — no surrounding quotes.
 - Respects .gitignore unless you pass a broad glob like '--glob *'.
 - Only filter by '${{ params.search.type }}' or '${{ params.search.glob }}' when you are sure of the file type; import paths may not match source file types (.js vs .ts).
-- Output is ripgrep-style: ':' marks match lines, '-' marks context lines, grouped by file. Large results are capped and report "at least" counts."#
+- Output is ripgrep-style: ':' marks match lines, '-' marks context lines, grouped by file. Large results are capped and report "at least" counts.
+For a symbol name, its callers or callees, or the blast radius of a diff, use search_symbols, trace_calls, or blast_radius."#
     }
 }
 

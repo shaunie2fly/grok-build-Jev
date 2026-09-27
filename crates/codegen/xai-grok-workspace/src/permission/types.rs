@@ -280,7 +280,10 @@ impl From<&xai_grok_tools::types::ToolInput> for AccessKind {
             | ToolInput::EnterPlanMode(_)
             | ToolInput::ExitPlanMode(_)
             | ToolInput::AskUserQuestion(_)
-            | ToolInput::UpdateGoal(_) => AccessKind::Read(None),
+            | ToolInput::UpdateGoal(_)
+            | ToolInput::SearchSymbols(_)
+            | ToolInput::TraceCalls(_)
+            | ToolInput::BlastRadius(_) => AccessKind::Read(None),
             ToolInput::Task(_) => AccessKind::Tool("task".to_owned()),
             ToolInput::SchedulerCreate(_) => AccessKind::Tool("scheduler_create".to_owned()),
             ToolInput::SchedulerDelete(_) => AccessKind::Tool("scheduler_delete".to_owned()),

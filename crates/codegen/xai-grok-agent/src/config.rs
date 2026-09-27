@@ -264,6 +264,9 @@ fn grok_build_core_toolset_with(
         (&grok_build::SearchReplaceTool).into(),
         (&grok_build::ListDirTool).into(),
         (&grok_build::GrepTool).into(),
+        (&grok_build::SearchSymbolsTool).into(),
+        (&grok_build::TraceCallsTool).into(),
+        (&grok_build::BlastRadiusTool).into(),
         kill_task_tool_config(),
         (&grok_build::TodoWriteTool).into(),
         task_output_tool_config(),
@@ -296,6 +299,9 @@ fn grok_build_concise_toolset() -> ToolServerConfig {
             (&grok_build_concise::SearchReplaceConciseTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
             kill_task_tool_config(),
             (&grok_build::TodoWriteTool).into(),
             task_output_tool_config(),
@@ -318,6 +324,9 @@ pub fn grok_build_hashline_toolset(
     tools.extend(hashline_tools);
     tools.extend([
         (&grok_build::ListDirTool).into(),
+        (&grok_build::SearchSymbolsTool).into(),
+        (&grok_build::TraceCallsTool).into(),
+        (&grok_build::BlastRadiusTool).into(),
         kill_task_tool_config(),
         (&grok_build::TodoWriteTool).into(),
         task_output_tool_config(),
@@ -364,6 +373,9 @@ fn explore_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
         ],
         behavior_preset: None,
     }
@@ -377,6 +389,9 @@ fn plan_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
             // (&grok_build::SkillTool).into(),
             (&grok_build::TodoWriteTool).into(),
             // search_replace and run_terminal_command intentionally omitted (read-only)
@@ -395,6 +410,9 @@ fn grok_build_plan_toolset() -> ToolServerConfig {
             (&grok_build::SearchReplaceTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
             kill_task_tool_config(),
             (&grok_build::TodoWriteTool).into(),
             task_output_tool_config(),
@@ -425,6 +443,9 @@ fn orchestrator_toolset() -> ToolServerConfig {
             (&grok_build::ReadFileTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
             // Subagent orchestration
             task_tool_config(),
             task_output_tool_config(),
@@ -1655,6 +1676,46 @@ mod tests {
         let explore = toolset_for_preset("explore").unwrap();
         assert!(explore.tools.len() < plan.tools.len());
         assert!(plan.tools.len() < gb.tools.len());
+    }
+    fn ids_of(preset: &str) -> std::collections::HashSet<String> {
+        toolset_for_preset(preset)
+            .unwrap()
+            .tools
+            .into_iter()
+            .map(|tool| tool.id)
+            .collect()
+    }
+    #[test]
+    fn code_graph_tools_are_on_explore_and_grok_build_and_not_on_computer() {
+        let symbol = ToolConfig::from(&grok_build::SearchSymbolsTool).id;
+        let trace = ToolConfig::from(&grok_build::TraceCallsTool).id;
+        let blast = ToolConfig::from(&grok_build::BlastRadiusTool).id;
+        let expect = [symbol.as_str(), trace.as_str(), blast.as_str()];
+        for preset in [
+            "grok-build",
+            "grok-build-concise",
+            "grok-build-plan",
+            "explore",
+            "plan",
+        ] {
+            let ids = ids_of(preset);
+            for id in expect {
+                assert!(ids.contains(id), "{preset} missing {id}");
+            }
+        }
+        for config in [
+            orchestrator_toolset(),
+            grok_build_hashline_toolset(Vec::new()),
+        ] {
+            let ids: Vec<&str> = config.tools.iter().map(|tool| tool.id.as_str()).collect();
+            for id in expect {
+                assert!(ids.contains(&id), "missing {id}");
+            }
+        }
+        for preset in ["grok-computer", "codex"] {
+            let ids = ids_of(preset);
+            assert!(!ids.contains(symbol.as_str()), "{preset}");
+        }
     }
     fn feedback_tool_id() -> String {
         ToolConfig::from(&grok_build::SendFeedbackTool).id

@@ -44,6 +44,7 @@ pub mod workflow;
 pub use app_builder::AppBuilderDeployerConfig;
 pub use ask_user_question::AskUserQuestionTool;
 pub use bash::BashTool;
+pub use code_graph::{BlastRadiusTool, SearchSymbolsTool, TraceCallsTool};
 pub use deploy_app::DEPLOY_APP_TOOL_NAME;
 pub use enter_plan_mode::EnterPlanModeTool;
 pub use exit_plan_mode::ExitPlanModeTool;

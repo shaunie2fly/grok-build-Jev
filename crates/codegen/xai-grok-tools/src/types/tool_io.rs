@@ -16,6 +16,9 @@ use crate::implementations::codex::grep_files::tool::CodexGrepFilesInput;
 use crate::implementations::codex::list_dir::tool::CodexListDirInput;
 use crate::implementations::codex::read_file::tool::CodexReadFileInput;
 use crate::implementations::grok_build::ask_user_question::AskUserQuestionInput;
+use crate::implementations::grok_build::code_graph::tools::{
+    BlastRadiusArgs, SearchSymbolsArgs, TraceCallsArgs,
+};
 use crate::implementations::grok_build::enter_plan_mode::EnterPlanModeInput;
 use crate::implementations::grok_build::exit_plan_mode::ExitPlanModeInput;
 use crate::implementations::grok_build::grep::GrepSearchInput;
@@ -89,6 +92,9 @@ pub enum ToolInput {
     SendSubagentMessage(SendSubagentMessageInput),
     SendFeedback(SendFeedbackInput),
     Lsp(LspToolInput),
+    SearchSymbols(SearchSymbolsArgs),
+    TraceCalls(TraceCallsArgs),
+    BlastRadius(BlastRadiusArgs),
     Monitor(crate::implementations::grok_build::monitor::types::MonitorInput),
     SchedulerCreate(crate::implementations::grok_build::scheduler::create::SchedulerCreateInput),
     SchedulerDelete(crate::implementations::grok_build::scheduler::delete::SchedulerDeleteInput),
