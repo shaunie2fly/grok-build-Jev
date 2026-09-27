@@ -190,9 +190,11 @@ async fn dispatch_tool(
     )
     .await
     {
-        Ok(Ok(output)) => match output_text(&output) {
-            Some(text) if is_unknown_project(&text) => QueryOutcome::UnknownProject,
-            Some(text) => QueryOutcome::Text(text),
+        Ok(Ok(output)) => match graph_body(&output) {
+            Some(GraphBody::McpError(text)) if is_unknown_project(&text) => {
+                QueryOutcome::UnknownProject
+            }
+            Some(GraphBody::Text(text) | GraphBody::McpError(text)) => QueryOutcome::Text(text),
             None => QueryOutcome::Sentence(QUERY_FAILED),
         },
         Ok(Err(err)) if is_not_connected(&err) => QueryOutcome::Sentence(NOT_CONNECTED),
@@ -206,14 +208,20 @@ fn qualified(tool: &str) -> String {
     format!("codebase-memory-mcp__{tool}")
 }
 
-/// `Text` and an MCP text body are model-facing. Any other variant is a failed query.
-fn output_text(output: &ToolOutput) -> Option<String> {
+enum GraphBody {
+    /// `ToolOutput::Text` or an MCP okay body. Never an unknown-project signal.
+    Text(String),
+    /// MCP `isError` body. May be a stale project name.
+    McpError(String),
+}
+
+/// Success text is returned as-is. Only an MCP error body can be a stale project.
+fn graph_body(output: &ToolOutput) -> Option<GraphBody> {
     match output {
-        ToolOutput::Text(text) => Some(text.text.clone()),
+        ToolOutput::Text(text) => Some(GraphBody::Text(text.text.clone())),
         ToolOutput::MCP(mcp) => match mcp.output() {
-            MCPOutputDetails::OkayOutput(text) | MCPOutputDetails::Error(text) => {
-                Some(text.clone())
-            }
+            MCPOutputDetails::OkayOutput(text) => Some(GraphBody::Text(text.clone())),
+            MCPOutputDetails::Error(text) => Some(GraphBody::McpError(text.clone())),
         },
         _ => None,
     }
@@ -225,18 +233,13 @@ fn is_not_connected(err: &xai_tool_runtime::ToolError) -> bool {
         || err.detail.contains("not a valid MCP tool name")
 }
 
-/// `codebase-memory-mcp` 0.10.2 reports a stale or rejected name as one of
-/// these short strings (`{"error":"project not found"}`, `project not found or
-/// not indexed`, `invalid project name`). A long tree result is left alone.
+/// `codebase-memory-mcp` 0.10.2 reports a stale or rejected name as
+/// `{"error":"project not found"}`, `project not found or not indexed`, or
+/// `invalid project name`. Checked only on `ToolError` detail and MCP error
+/// bodies, never on a successful graph result.
 fn is_unknown_project(text: &str) -> bool {
-    let trimmed = text.trim();
-    if trimmed.len() > 512 {
-        return false;
-    }
-    let lower = trimmed.to_ascii_lowercase();
-    lower.contains("project not found")
-        || lower.contains("invalid project name")
-        || lower.contains("unknown project")
+    let lower = text.to_ascii_lowercase();
+    lower.contains("project not found") || lower.contains("invalid project name")
 }
 
 fn clamp_depth(depth: u32) -> u32 {
@@ -437,6 +440,14 @@ mod tests {
 
     fn text_output(text: &str) -> ToolOutput {
         ToolOutput::Text(text.into())
+    }
+
+    fn mcp_error(text: &str) -> ToolOutput {
+        ToolOutput::MCP(MCPOutput::errored(
+            "codebase-memory-mcp__search_graph".into(),
+            "codebase-memory-mcp".into(),
+            text.into(),
+        ))
     }
 
     fn list_projects_json(name: &str, root: &str, nodes: u64) -> ToolOutput {
@@ -816,11 +827,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn graph_text_that_mentions_an_unknown_project_is_returned() {
+        let _guard = begin().await;
+        let fake = FakeDispatch::with_responses(vec![
+            list_projects_json("grok", "/repo", 1),
+            text_output("unknown project in the tree"),
+        ]);
+        let ctx = ctx_with_cwd_and_dispatch(Path::new("/repo"), fake.clone());
+        let out = search_symbols(&ctx, symbol_request()).await;
+        assert_eq!(out, "unknown project in the tree");
+        assert_ne!(out, QUERY_FAILED);
+        assert_eq!(fake.len(), 2);
+    }
+
+    #[tokio::test]
     async fn unknown_project_retries_once_with_a_fresh_list() {
         let _guard = begin().await;
         let fake = FakeDispatch::with_responses(vec![
             list_projects_json("stale", "/repo", 1),
-            text_output(r#"{"error":"project not found"}"#),
+            mcp_error(r#"{"error":"project not found"}"#),
             list_projects_json("grok", "/repo", 10),
             text_output("fn grok"),
         ]);
@@ -842,7 +867,7 @@ mod tests {
             Ok(list_projects_json("stale", "/repo", 1)),
             Err(xai_tool_runtime::ToolError::execution(
                 tool_id,
-                "unknown project: stale",
+                r#"{"error":"project not found"}"#,
             )),
             Ok(list_projects_json("grok", "/repo", 8)),
             Ok(text_output("caller")),
@@ -866,13 +891,9 @@ mod tests {
         let _guard = begin().await;
         let fake = FakeDispatch::with_responses(vec![
             list_projects_json("stale", "/repo", 1),
-            text_output("project not found or not indexed"),
+            mcp_error("project not found or not indexed"),
             list_projects_json("still-stale", "/repo", 2),
-            ToolOutput::MCP(MCPOutput::errored(
-                "codebase-memory-mcp__search_graph".into(),
-                "codebase-memory-mcp".into(),
-                "invalid project name".into(),
-            )),
+            mcp_error("invalid project name"),
         ]);
         let ctx = ctx_with_cwd_and_dispatch(Path::new("/repo"), fake.clone());
         let out = blast_radius(
