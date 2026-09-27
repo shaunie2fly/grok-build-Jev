@@ -13,9 +13,9 @@ use super::tools::{
     BlastRadiusArgs, BlastRadiusTool, SearchSymbolsArgs, SearchSymbolsTool, TraceCallsArgs,
     TraceCallsTool,
 };
+use crate::DEFAULT_TOOL_OUTPUT_BYTES;
 use crate::types::tool_metadata::ToolMetadata;
 use crate::util::mcp_truncate::MCP_MAX_OUTPUT_BYTES;
-use crate::DEFAULT_TOOL_OUTPUT_BYTES;
 
 const GREP_LINE: &str = "src/lib.rs:10:fn select_project() {\n";
 
