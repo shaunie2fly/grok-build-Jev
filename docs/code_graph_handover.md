@@ -48,21 +48,32 @@ surface, `token_report.rs` measurement).
 
 ### Repository state
 
+**Do not trust a pinned HEAD here — this file is itself a commit.** Compute the volatile facts:
+
+```sh
+cd /mnt/data/repos/grok-build-Jev
+git rev-parse --short HEAD                      # moves with every commit, including this doc's
+git rev-list --count origin/main..HEAD          # unpushed follow-ups; nonzero = not released
+git status --porcelain                          # expect EMPTY
+./scripts/deploy-fork.sh --status | sed -n '1,6p'   # what the host actually runs
 ```
-main         = a852a525  (12 commits ahead of origin/main, UNPUSHED)
-origin/main  = 80c13220  (contains the judgment body, not this one)
-code graph   = 34d26652 … c680d3c7, then 6ba049a3 / 239c0091 / a852a525 (follow-ups)
-working tree: clean
-installed    : ~/.grok/bin/grok → grok-1.0.41-jev-c680d3c7  (predates the follow-ups)
+
+What is fixed, and what a falsifier should hold them to:
+
+```
+origin/main  = 80c13220   (the judgment body; nothing of the code graph is on the remote)
+body         = 80c13220..c680d3c7  → exactly 8 commits  (git rev-list --count)
+installed    = whatever deploy-fork.sh --status reports; as of 2026-09-27 it is
+               grok-1.0.41-jev-c680d3c7, which PREDATES the follow-ups
 ```
 
 **Check 1.1 — the body and its follow-ups are real and correctly ordered**
 
 ```sh
-cd /mnt/data/repos/grok-build-Jev
-git log --oneline 80c13220..HEAD | cat          # expect 11 commits, 8 body + 3 follow-up
+git rev-list --count 80c13220..c680d3c7                      # expect 8
 git merge-base --is-ancestor c680d3c7 HEAD && echo "body is in HEAD"
-git status --porcelain                          # expect EMPTY
+git log --oneline c680d3c7..HEAD | cat                       # the follow-ups, oldest first
+git status --porcelain                                        # expect EMPTY
 ```
 
 ---
@@ -90,13 +101,20 @@ interpret: `NOT_CONNECTED`, `NO_INDEX`, `QUERY_FAILED`, `QUERY_TIMEOUT`, plus a 
 
 ```sh
 cargo test -p xai-grok-tools --lib code_graph
-# expect: 35 passed; 0 failed
+# expect: 36 passed; 0 failed
 ```
 
-The count was 35 before the follow-ups and is 35 after: `239c0091` deleted
+The count moved 35 → 35 → 36 across the follow-ups. `239c0091` deleted
 `caps_and_fail_open_sentences_match_the_plan` (it compared each constant to its own literal and
 could not fail) and added `the_live_unknown_project_body_is_still_recognised` (it holds the exact
-body a live server returns).
+body a live server returns). A later commit added
+`a_retry_that_fails_differently_keeps_its_own_sentence`, because the retry arm that forwards
+`QueryOutcome::Sentence` was, until then, reachable by no test at all — reverting it to
+`_ => QUERY_FAILED` left the suite green.
+
+The number is a *run* result, not a count of `#[test]` attributes. The filter `code_graph` also
+matches `tool_taxonomy::tests::code_graph_is_read_only`, which lives outside the directory; a static
+attribute count will disagree with the runner.
 
 ### Check 3.2 — hygiene
 
@@ -119,14 +137,26 @@ Adding a `ToolKind` variant touches every enumeration. All of these were updated
 must stay in step:
 
 ```sh
-grep -rn "CodeGraph" --include=*.rs --include=*.json crates | sed 's/:.*//' | sort -u
+# (a) the kind, wherever ToolKind::CodeGraph is named — 6 files, exact:
+grep -rln "CodeGraph" --include=*.rs crates | sort
+
+# (b) the tools, wherever their input types are bound — 9 files, exact:
+grep -rln "SearchSymbols\|TraceCalls\|BlastRadius" --include=*.rs crates | sort
+
+# (c) the published schema — 1 occurrence:
+grep -c "code_graph" crates/codegen/xai-grok-tools/schema/tool_meta.schema.json
 ```
 
-Expect all of: `types/tool.rs` (the variant), `tool_taxonomy.rs` (presentation name + `is_read_only`),
-`xai-grok-workspace/src/capability.rs` (`ALL_TOOL_KINDS` + the inspect-class arm of `kind_allowed`),
-`.../permission/types.rs` (`AccessKind::Read(None)`), `task/types.rs` (all four
-`SubagentCapabilityMode` arms), `media_gen_limits.rs` (+ the `VARIANT_COUNT` 33→34 assertion),
-`normalization.rs`, `registry/types.rs`, `types/tool_io.rs`, `schema/tool_meta.schema.json`.
+Between them, (a) and (b) must reach: `types/tool.rs` (the variant), `tool_taxonomy.rs` (name +
+`is_read_only` + the approval gate), `xai-grok-workspace/src/capability.rs` (`ALL_TOOL_KINDS` and
+the inspect-class arm of `kind_allowed`), `.../permission/types.rs` (`AccessKind::Read(None)`),
+`task/types.rs` (all four `SubagentCapabilityMode` arms), `media_gen_limits.rs` (+ the
+`VARIANT_COUNT` 33→34 assertion), `normalization.rs`, `registry/types.rs`, `types/tool_io.rs`,
+`xai-grok-agent/src/config.rs` (the toolsets), and the `code_graph/` module itself.
+
+`permission/types.rs`, `normalization.rs` and `registry/types.rs` appear only in (b): they bind the
+tool *input* types, never the kind. A single grep for `CodeGraph` will not find them, and reading
+that as a missing binding is the mistake this check exists to prevent.
 
 `capability.rs:103` has a compile-time `const _: () = assert!(ALL_TOOL_KINDS.len() ==
 ToolKind::VARIANT_COUNT)`; a new variant cannot be added without forcing a triage decision. The
@@ -172,10 +202,13 @@ argument shapes `client.rs` sends. Re-run them; a failure here outranks the test
 `size_bytes`; `parse_projects` requires the first three and defaults the counts to 0.
 
 **4.2 — duplicate indexes on one root are resolved deterministically.** This host carries **two**
-indexes for `/mnt/data/repos/grok-build-Jev` (`mnt-data-repos-grok-build-Jev`, 133 655 nodes;
-`grok-build-Jev`, 133 395). The ranking — path depth, then `nodes`, then `size_bytes`, then name —
-picks the larger. Any host that re-indexes under a second name hits this path, so it is not
-hypothetical.
+indexes for `/mnt/data/repos/grok-build-Jev` (`mnt-data-repos-grok-build-Jev` and `grok-build-Jev`).
+The ranking — path depth, then `nodes`, then `size_bytes`, then name — picks the larger.
+
+> The node counts observed on 2026-09-27 were 133 655 and 133 395, **and they drift** — the index
+> grows with every commit. Re-run `list_projects` rather than asserting the numbers; what matters is
+> that two names share a root and the larger one wins deterministically. (The unit test
+> `two_indexes_of_one_root_use_the_larger_node_count` uses its own fixture numbers, not these.)
 
 **4.3 — every tool accepts the client's arg shape.**
 `search_graph {project, query, limit:15, offset:0, format:"tree", detail:"default"}`;
@@ -183,18 +216,19 @@ hypothetical.
 mode:"calls", include_tests:false}`; `detect_changes {project, scope:"impact", direction:"inbound",
 depth:2, limit:40, format:"tree", since:"HEAD~3"}`. All three returned data.
 
-**4.4 — an unknown project comes back as an MCP *error* body**, not a success body:
+**4.4 — an unknown project comes back as an MCP *error* body**, not a success body. Observed live:
 
 ```json
 {"error":"project not found or not indexed",
  "hint":"Use list_projects to see all indexed projects, then pass it as the \"project\" argument.",
- "available_projects":[…],"count":11}
+ "available_projects":[…11 names…],"count":11}
 ```
 
 This is what `UNKNOWN_PROJECT_MARKERS` matches, and it is why the markers are checked on error
-bodies only. `the_live_unknown_project_body_is_still_recognised` pins the exact string; if a server
-upgrade rephrases it, that test fails instead of the markers silently falling through to
-`QUERY_FAILED` and losing the single automatic retry.
+bodies only. `the_live_unknown_project_body_is_still_recognised` pins an **abridged** form of this
+body — same `error` string, one project in the list, `"count":1` — so the fixture stays short. The
+matched substring is the `error` value; if a server upgrade rephrases it, that test fails instead
+of the markers silently falling through to `QUERY_FAILED` and losing the single automatic retry.
 
 **4.5 — no blocking call on the async path.** The client dispatches through
 `use_tool::dispatch_mcp_tool` (an MCP call, no `std::process`/`reqwest::blocking`), wraps it in a
@@ -229,19 +263,21 @@ server. No test covers a real MCP registry lookup — the suite injects a fake `
 
 Do not report these as validated.
 
-1. **No end-to-end run through a real `grok` session.** All 35 tests inject a fake `ToolDispatch`;
+1. **No end-to-end run through a real `grok` session.** Every test injects a fake `ToolDispatch`;
    §4's probes exercise the server, not the tool loop. Reproduce with a scratch home and a live
    `codebase-memory-mcp`: `search_symbols` a known symbol, `trace_calls` on it, `blast_radius` with
    `since=HEAD~1`. This is the only way to confirm or dismiss limit 5.1 empirically.
-2. **Nothing is pushed.** `main` is 12 commits ahead of `origin/main`, and there is no tag for this
-   body (the repo's only tag is `v1.0.38-jev`, on `050d560b`).
+2. **Nothing is pushed.** `git rev-list --count origin/main..HEAD` is nonzero, and the repo has no
+   tag for this body — its only tag is `v1.0.38-jev`, on `050d560b`. Check both yourself; the count
+   grows with every follow-up.
 3. **`cargo check --workspace --all-targets` is red for a pre-existing reason**:
    `crates/codegen/xai-grok-pager/tests/registered_features_are_documented.rs` `include_str!`s
    `../docs/internal/25-enterprise.md` and `22-environment-variables.md`, and
    `crates/codegen/xai-grok-pager/docs/internal/` does not exist. No pager file appears in
    `80c13220..c680d3c7`. A green targeted suite does not mean the workspace builds.
-4. **The installed binary predates the follow-ups.** `~/.grok/bin/grok` is `c680d3c7`; the three
-   follow-up commits are not in it. `agent` still points at `grok-1.0.41-jev-a616779`.
+4. **The installed binary predates the follow-ups.** `deploy-fork.sh --status` reported
+   `grok-1.0.41-jev-c680d3c7` on 2026-09-27, which contains the body but not the follow-ups.
+   `agent` still pointed at `grok-1.0.41-jev-a616779` at the same moment.
 
 ---
 

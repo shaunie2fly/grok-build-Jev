@@ -46,14 +46,20 @@ judgment fix **by hash**, not by position.
 ```
 judgment fix   = a616779e  (parent 2bc80cb8, the upstream merge)  ← the commit this doc validates
 doc commits    = 9f160f0c (this file) → 82dfe92a (§12) → 80c13220 (credential-less hook test)
-code graph     = 34d26652 … c680d3c7  (feat/code-graph-thin-client, fast-forwarded onto main)
-HEAD           = c680d3c7  (branch main)
-origin/main    = 80c13220  ← main is AHEAD BY 8 AND UNPUSHED (code graph only)
-working tree: clean
+origin/main    = 80c13220  ← already contains a616779e; pushed 2026-09-27 06:52
 ```
 
-`a616779e` is an ancestor of `origin/main` (pushed 2026-09-27 06:52), so the judgment fix is on the
-remote. The 8 code-graph commits on top of it are local only.
+`HEAD` and the ahead-count are **deliberately not pinned** — they rot on every commit, including the
+one that carries this file. Read them instead:
+
+```sh
+git rev-parse --short HEAD              # whatever main is now
+git rev-list --count origin/main..HEAD  # nonzero: the code-graph body and its follow-ups are local
+```
+
+`main` is ahead of `origin/main` by that whole local block: the 8 commits of the code-graph body
+(`80c13220..c680d3c7`, see `code_graph_handover.md`) plus its follow-ups. None of them touch the
+judgment layer.
 
 **Check 1.1 — is the fix commit real and correctly parented?**
 
@@ -68,8 +74,9 @@ git status --porcelain                            # expect EMPTY (clean tree)
 
 If `git status` is non-empty, the working tree has drifted from what was validated — stop and ask.
 
-> **Action item — CLOSED 2026-09-27:** the judgment commits were pushed; `origin/main` is now
-> `80c13220`, which contains `a616779e`. Only the 8 code-graph commits above it remain local.
+> **Action item — CLOSED 2026-09-27:** the judgment commits were pushed; `origin/main` is
+> `80c13220`, which contains `a616779e`. Everything on `main` above that is the code-graph body and
+> its follow-ups, and is still local — `git rev-list --count origin/main..HEAD` for the number.
 
 ---
 
@@ -395,8 +402,8 @@ Do not report these as validated. They are either unproven or known-open.
 
 ## 7. Deployed state (host: shaun-laptop-14)
 
-binary     : ~/.grok/bin/grok-1.0.41-jev-c680d3c7  (symlinks: grok, agent)
-             reports: grok 1.0.41-jev (c680d3c7c912)
+binary     : whatever `deploy-fork.sh --status` reports (symlinks: grok, agent)
+             (observed 2026-09-27: grok 1.0.41-jev (c680d3c7c912) — re-read, do not trust this)
 previous   : ~/.grok/bin/grok-1.0.41-jev-a616779   (the judgment-only deploy this section validated)
 rollback   : ~/.grok/bin/grok-1.0.38-jev-240a36a   (via scripts/deploy-fork.sh --rollback)
 install state: ~/.grok/bin/.fork-install-state
@@ -407,17 +414,20 @@ backup     : ~/.grok/config.toml.bak-pre-threshold-fix
 auto_update: false (required — otherwise npm's updater replaces the fork)
 ```
 
-**Check 7.1 — deployed binary matches the validated commit**
+**Check 7.1 — the deployed binary is a commit this document can vouch for**
 
 ```sh
-/home/shaun/.grok/bin/grok --version          # expect: grok 1.0.41-jev (c680d3c7c912)
-cat /home/shaun/.grok/bin/.fork-install-state # expect commit=c680d3c7, version=1.0.41-jev
+cd /mnt/data/repos/grok-build-Jev
+./scripts/deploy-fork.sh --status | sed -n '1,6p'   # current: / previous: / commit:
+/home/shaun/.grok/bin/grok --version
 ```
 
-The trailing `c680d3c7` must equal `git rev-parse --short HEAD` in the repo. **If the repo has moved
-on since the deploy, the deployed binary no longer corresponds to HEAD** — that is the single most
-likely way this handover goes stale. (`grok-1.0.41-jev-a616779` is still on disk as `previous`; it
-is the binary the judgment sections were originally validated against, not the one now installed.)
+The reported `commit` must be `a616779e` **or an ancestor of it** for every judgment section here
+to still describe the installed binary. On 2026-09-27 it reported `c680d3c7` — the judgment fix is
+inside that build, so the sections still hold, but the trailing hash no longer equals
+`git rev-parse --short HEAD`, and that divergence is the single most likely way this handover goes
+stale. It is a warning, not a failure: what must hold is ancestry, not equality. Re-run
+`git merge-base --is-ancestor a616779e <reported-commit>` rather than eyeballing the hashes.
 
 **Check 7.2 — the live config parses and the threshold is applied**
 
@@ -758,10 +768,10 @@ either the menu changed (re-read `models_cache.json`) or the mapping drifted.
 This document validates **one commit**: `a616779e`. `main` has moved since, so read the repository
 state block in §1 before running anything here.
 
-| Body of work | Commits | On `origin/main`? |
+| Body of work | Range | On `origin/main`? |
 |---|---|---|
 | This handover (`9f160f0c`) and the §12 mechanism doc (`82dfe92a`) | `a616779e` → `9f160f0c` → `82dfe92a` → `80c13220` | yes — `origin/main` is `80c13220` |
-| Code-graph thin client (`search_symbols`, `trace_calls`, `blast_radius`) | `34d26652` … `c680d3c7` | **no** — 8 commits, local only at time of writing |
+| Code-graph thin client (`search_symbols`, `trace_calls`, `blast_radius`) + follow-ups | `80c13220..c680d3c7` (8 commits) then `c680d3c7..HEAD` | **no** — all local; `git rev-list --count origin/main..HEAD` for the number |
 
 **The code-graph work does not touch the judgment layer.** It adds a new `ToolKind::CodeGraph`
 (read-only) and three MCP-backed tools. To review it: `git show 80c13220..c680d3c7`, then
