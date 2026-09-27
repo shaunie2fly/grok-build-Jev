@@ -43,6 +43,7 @@ impl ToolKind {
             ToolKind::List => "List Files",
             ToolKind::Search => "Search",
             ToolKind::Lsp => "Code Intelligence",
+            ToolKind::CodeGraph => "Code Graph",
             ToolKind::Execute => "Run Command",
             ToolKind::Plan => "Plan",
             ToolKind::WebSearch => "Web Search",
@@ -81,6 +82,7 @@ impl ToolKind {
             ToolKind::Read
             | ToolKind::Search
             | ToolKind::Lsp
+            | ToolKind::CodeGraph
             | ToolKind::ListDir
             | ToolKind::List
             | ToolKind::MemorySearch
@@ -118,6 +120,27 @@ impl ToolKind {
         }
     }
 }
+
+/// Whether a tool of this kind skips the write-approval gate.
+pub fn skips_write_approval(kind: ToolKind) -> bool {
+    matches!(
+        kind,
+        ToolKind::Read
+            | ToolKind::Search
+            | ToolKind::Lsp
+            | ToolKind::CodeGraph
+            | ToolKind::ListDir
+            | ToolKind::List
+            | ToolKind::MemorySearch
+            | ToolKind::MemoryGet
+            | ToolKind::WebSearch
+            | ToolKind::WebFetch
+            | ToolKind::EnterPlan
+            | ToolKind::ExitPlan
+            | ToolKind::AskUser
+    )
+}
+
 /// First-party tool wire names whose argument streams are long enough for a writing-phase spinner label to be visible (file bodies, edit
 /// strings, shell scripts, prompts), paired with their [`ToolKind`]. Public so clients can pin that every entry gets non-fallback display copy
 /// — a spelling added here without client copy would otherwise silently keep the raw-name fallback.
@@ -298,6 +321,15 @@ mod tests {
         assert!(!ToolKind::Edit.is_read_only());
         assert!(!ToolKind::Execute.is_read_only());
         assert!(!ToolKind::Delete.is_read_only());
+    }
+
+    #[test]
+    fn code_graph_is_read_only_code_intelligence() {
+        assert_eq!(ToolKind::CodeGraph.presentation_name(), "Code Graph");
+        assert!(ToolKind::CodeGraph.is_read_only());
+        assert!(skips_write_approval(ToolKind::CodeGraph));
+        assert!(skips_write_approval(ToolKind::Lsp));
+        assert!(!skips_write_approval(ToolKind::Edit));
     }
     #[test]
     fn namespace_round_trips_snake_case_with_pascal_aliases() {

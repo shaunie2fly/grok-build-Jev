@@ -2151,24 +2151,7 @@ impl SessionActor {
             .borrow()
             .tool_bridge()
             .tool_kind(&call.function.name)
-            .map(|k| {
-                use xai_grok_tools::types::tool::ToolKind;
-                matches!(
-                    k,
-                    ToolKind::Read
-                        | ToolKind::Search
-                        | ToolKind::Lsp
-                        | ToolKind::ListDir
-                        | ToolKind::List
-                        | ToolKind::MemorySearch
-                        | ToolKind::MemoryGet
-                        | ToolKind::WebSearch
-                        | ToolKind::WebFetch
-                        | ToolKind::EnterPlan
-                        | ToolKind::ExitPlan
-                        | ToolKind::AskUser
-                )
-            })
+            .map(|k| xai_grok_tools::tool_taxonomy::skips_write_approval(k))
             .unwrap_or(false);
         let arguments = match mcp_preparation.finish(raw_input, raw_arguments).await {
             Ok(arguments) => arguments,

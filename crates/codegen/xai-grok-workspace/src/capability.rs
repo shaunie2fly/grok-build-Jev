@@ -68,6 +68,7 @@ pub(crate) const ALL_TOOL_KINDS: &[ToolKind] = &[
     ToolKind::Move,
     ToolKind::Search,
     ToolKind::Lsp,
+    ToolKind::CodeGraph,
     ToolKind::Execute,
     ToolKind::Plan,
     ToolKind::WebSearch,
@@ -129,7 +130,9 @@ pub(crate) fn kind_allowed(mode: CapabilityMode, kind: ToolKind) -> bool {
         }
 
         // Inspect class.
-        Lsp | ListDir | List => matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute),
+        Lsp | CodeGraph | ListDir | List => {
+            matches!(mode, M::ReadOnly | M::ReadWrite | M::Execute)
+        }
 
         // Edit class.
         Edit | Write | Delete | Move | Feedback | ImageGen | VideoGen | ImageToVideo
@@ -168,6 +171,7 @@ mod tests {
             test_support::tc("read", Some(ToolKind::Read)),
             test_support::tc("search", Some(ToolKind::Search)),
             test_support::tc("inspect", Some(ToolKind::Lsp)),
+            test_support::tc("code_graph", Some(ToolKind::CodeGraph)),
             test_support::tc("edit", Some(ToolKind::Edit)),
             test_support::tc("write", Some(ToolKind::Write)),
             test_support::tc("feedback", Some(ToolKind::Feedback)),
@@ -183,28 +187,58 @@ mod tests {
         };
 
         let ro = CapabilityMode::ReadOnly.filter(&cfg);
-        assert_eq!(names(&ro), vec!["read", "search", "inspect", "plan", "ask"]);
+        assert_eq!(
+            names(&ro),
+            vec!["read", "search", "inspect", "code_graph", "plan", "ask"]
+        );
 
         let rw = CapabilityMode::ReadWrite.filter(&cfg);
         assert_eq!(
             names(&rw),
             vec![
-                "read", "search", "inspect", "edit", "write", "feedback", "plan", "ask"
+                "read",
+                "search",
+                "inspect",
+                "code_graph",
+                "edit",
+                "write",
+                "feedback",
+                "plan",
+                "ask"
             ]
         );
 
         let ex = CapabilityMode::Execute.filter(&cfg);
         assert_eq!(
             names(&ex),
-            vec!["read", "search", "inspect", "bash", "bg", "plan", "ask"]
+            vec![
+                "read",
+                "search",
+                "inspect",
+                "code_graph",
+                "bash",
+                "bg",
+                "plan",
+                "ask"
+            ]
         );
 
         let all = CapabilityMode::All.filter(&cfg);
         assert_eq!(
             names(&all),
             vec![
-                "read", "search", "inspect", "edit", "write", "feedback", "bash", "bg", "plan",
-                "ask", "other"
+                "read",
+                "search",
+                "inspect",
+                "code_graph",
+                "edit",
+                "write",
+                "feedback",
+                "bash",
+                "bg",
+                "plan",
+                "ask",
+                "other"
             ]
         );
     }

@@ -68,6 +68,7 @@ pub enum ToolKind {
     Move,
     Search,
     Lsp,
+    CodeGraph,
     Execute,
     Plan,
     WebSearch,

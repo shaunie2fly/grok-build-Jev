@@ -329,6 +329,7 @@ impl SubagentCapabilityModeExt for SubagentCapabilityMode {
                 ToolKind::List,
                 ToolKind::Search,
                 ToolKind::Lsp,
+                ToolKind::CodeGraph,
                 ToolKind::Plan,
                 ToolKind::MemorySearch,
                 ToolKind::MemoryGet,
@@ -348,6 +349,7 @@ impl SubagentCapabilityModeExt for SubagentCapabilityMode {
                 ToolKind::List,
                 ToolKind::Search,
                 ToolKind::Lsp,
+                ToolKind::CodeGraph,
                 ToolKind::Edit,
                 ToolKind::Write,
                 ToolKind::Delete,
@@ -377,6 +379,7 @@ impl SubagentCapabilityModeExt for SubagentCapabilityMode {
                 ToolKind::List,
                 ToolKind::Search,
                 ToolKind::Lsp,
+                ToolKind::CodeGraph,
                 ToolKind::Execute,
                 ToolKind::Plan,
                 ToolKind::MemorySearch,
@@ -398,6 +401,7 @@ impl SubagentCapabilityModeExt for SubagentCapabilityMode {
                 ToolKind::List,
                 ToolKind::Search,
                 ToolKind::Lsp,
+                ToolKind::CodeGraph,
                 ToolKind::Edit,
                 ToolKind::Write,
                 ToolKind::Delete,
@@ -1300,6 +1304,10 @@ mod tests {
             assert!(
                 mode.allowed_tool_kinds().contains(&ToolKind::Lsp),
                 "{mode:?} should preserve ToolKind::Lsp"
+            );
+            assert!(
+                mode.allowed_tool_kinds().contains(&ToolKind::CodeGraph),
+                "{mode:?} should preserve ToolKind::CodeGraph"
             );
         }
     }
