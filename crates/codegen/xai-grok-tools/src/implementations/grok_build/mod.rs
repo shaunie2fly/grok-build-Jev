@@ -12,6 +12,7 @@
 pub mod app_builder;
 pub mod ask_user_question;
 pub mod bash;
+pub mod code_graph;
 #[path = "deploy_app_stub.rs"]
 pub mod deploy_app;
 pub mod enter_plan_mode;
