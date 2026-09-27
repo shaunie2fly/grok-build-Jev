@@ -364,10 +364,10 @@ async fn dead_end_verification_requires_a_confident_verdict() {
     }
 }
 
-/// Safety gating compares the destructiveness probability against the configured threshold.
-/// `safety_threshold` is an `f32`, so the 0.20 default widens to 0.20000000298023224; the cases
-/// stay clear of the exact edge, and the exclusive comparison itself is covered by the custom
-/// threshold test below using an exactly representable value.
+/// Safety gating compares the destructiveness probability against the threshold on the evaluator.
+/// The helper pins that threshold at `0.20` (an `f32`, so it widens to 0.20000000298023224); the
+/// cases stay clear of that edge. The schema default is `0.08` and is pinned separately. The
+/// exclusive comparison itself is covered by the representable-threshold test below.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn tool_safety_gating_honors_the_configured_threshold() {
     for (noul, expected) in [(0.0, true), (0.19, true), (0.21, false), (0.9, false)] {

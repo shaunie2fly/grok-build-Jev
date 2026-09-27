@@ -1,9 +1,12 @@
 //! [`super::JudgmentHook`] gating tests.
 //!
-//! These construct configs directly, so no test mutates process env and none need `#[serial]`.
-//! A credential is supplied literally; the endpoint is never contacted.
+//! These construct configs directly. The endpoint is never contacted.
+//! The credential-less case clears the process fallback variables for the duration of the test,
+//! because a developer shell often exports them.
 
 use super::*;
+use serial_test::serial;
+use xai_grok_test_support::EnvGuard;
 
 const ENDPOINT: &str = "http://127.0.0.1:1/";
 
@@ -19,6 +22,7 @@ fn enabled() -> JudgmentConfig {
 /// The zero-regression contract: an absent, disabled, or credential-less section yields no hook,
 /// so every subsystem keeps vanilla behavior.
 #[test]
+#[serial]
 fn no_hook_without_an_enabled_configured_section() {
     assert!(JudgmentHook::from_config(None).is_none(), "section absent");
     assert!(
@@ -32,10 +36,13 @@ fn no_hook_without_an_enabled_configured_section() {
         endpoint: ENDPOINT.to_owned(),
         ..JudgmentConfig::default()
     };
-    // No `env:VAR` and no fallback variables set in this process ⇒ no credential ⇒ no hook.
+    // Fallback variables are part of credential resolution. Clear them so this assertion tests
+    // the credential-less path rather than whatever the developer shell exported.
+    let _primary = EnvGuard::unset("TYPESAFE_API_KEY");
+    let _secondary = EnvGuard::unset("JEV_TYPESAFE_AI_KEY");
     assert!(
         super::super::client::JevClient::try_new(None, ENDPOINT.to_owned(), 400).is_none(),
-        "guard: this environment must expose no fallback credential for the assertion below"
+        "with both fallback variables unset, a keyless config must not build a client"
     );
     assert!(JudgmentHook::from_config(Some(&without_key)).is_none());
 
