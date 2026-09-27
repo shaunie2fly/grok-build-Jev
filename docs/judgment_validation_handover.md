@@ -403,9 +403,10 @@ Do not report these as validated. They are either unproven or known-open.
 ## 7. Deployed state (host: shaun-laptop-14)
 
 binary     : whatever `deploy-fork.sh --status` reports (symlinks: grok, agent)
-             (observed 2026-09-27: grok 1.0.41-jev (c680d3c7c912) — re-read, do not trust this)
-previous   : ~/.grok/bin/grok-1.0.41-jev-a616779   (the judgment-only deploy this section validated)
-rollback   : ~/.grok/bin/grok-1.0.38-jev-240a36a   (via scripts/deploy-fork.sh --rollback)
+             (observed 2026-09-27 20:10: grok-1.0.41-jev-6736d3e, after the code-graph follow-ups)
+previous   : whatever `--status` lists as `previous`; deploy keeps the last 3 fork binaries
+             (FORK_KEEP), so an old target named here may since have been pruned
+rollback   : `scripts/deploy-fork.sh --rollback` → the `previous` entry from `--status`
 install state: ~/.grok/bin/.fork-install-state
 config     : ~/.grok/config.toml
              safety_threshold = 0.08   (was 0.20000000298023224)
@@ -518,10 +519,15 @@ you create your own (§7), delete them.
 
 ```sh
 cd /mnt/data/repos/grok-build-Jev
-scripts/deploy-fork.sh --rollback     # repoints grok + agent to grok-1.0.38-jev-240a36a
-scripts/deploy-fork.sh --status       # confirm
+scripts/deploy-fork.sh --status                    # read `current:` and `previous:` first
+scripts/deploy-fork.sh --rollback                  # repoints grok + agent to `previous:`
+scripts/deploy-fork.sh --status                    # confirm
 cp ~/.grok/config.toml.bak-pre-threshold-fix ~/.grok/config.toml   # restore threshold 0.20
 ```
+
+Read the rollback target from `--status` rather than trusting a name written here: the script keeps
+only `FORK_KEEP` (default 3) fork binaries and prunes older ones. On 2026-09-27 a deploy pruned
+`grok-1.0.38-jev-240a36a` and `grok-1.0.38-fork-050d560`, which this section used to name.
 
 Rolling back the binary alone is not enough — the config change is separate, and vice versa.
 
