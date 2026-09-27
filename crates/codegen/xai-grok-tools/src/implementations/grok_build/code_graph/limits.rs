@@ -45,15 +45,15 @@ pub(crate) fn cap_text(text: &str, max_bytes: usize) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::cap_text;
+    use super::{TRUNCATION_HINT, cap_text};
 
     #[test]
     fn cap_text_appends_the_narrow_hint_on_a_char_boundary() {
         let text = "ééééé"; // 5 chars, 10 bytes
         let capped = cap_text(text, 4);
         assert!(capped.starts_with("éé"));
-        assert!(capped.contains("truncated"));
-        assert!(capped.contains("Narrow the query"));
+        assert!(capped.ends_with(TRUNCATION_HINT));
+        assert_eq!(capped.len(), 4 + TRUNCATION_HINT.len());
         assert!(!capped.contains('\u{fffd}'));
     }
 

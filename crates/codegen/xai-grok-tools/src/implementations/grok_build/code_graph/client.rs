@@ -870,6 +870,31 @@ mod tests {
         assert_eq!(json_str(&fake.call(3).args, "project"), Some("grok"));
     }
 
+    /// Regression guard for the retry arm that forwards `Sentence`. Reverting that arm to
+    /// `_ => QUERY_FAILED` used to pass the suite: the other three retry tests all end in `Text`
+    /// or a second `UnknownProject`, so nothing reached it. The distinguishing case is a retry
+    /// that fails for a *different* reason than the stale project it was retrying past.
+    #[tokio::test]
+    async fn a_retry_that_fails_differently_keeps_its_own_sentence() {
+        let _guard = begin().await;
+        let tool_id =
+            xai_tool_protocol::ToolId::new("codebase-memory-mcp__search_graph").expect("id");
+        let fake = FakeDispatch::scripted(vec![
+            Ok(list_projects_json("stale", "/repo", 1)),
+            Ok(mcp_error(r#"{"error":"project not found"}"#)),
+            Ok(list_projects_json("grok", "/repo", 10)),
+            Err(xai_tool_runtime::ToolError::not_found(
+                tool_id,
+                "Tool not found",
+            )),
+        ]);
+        let ctx = ctx_with_cwd_and_dispatch(Path::new("/repo"), fake.clone());
+        let out = search_symbols(&ctx, symbol_request()).await;
+        assert_eq!(out, NOT_CONNECTED);
+        assert_ne!(out, QUERY_FAILED);
+        assert_eq!(fake.len(), 4);
+    }
+
     #[tokio::test]
     async fn unknown_project_tool_error_retries_once() {
         let _guard = begin().await;
