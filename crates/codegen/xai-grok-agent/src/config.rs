@@ -495,6 +495,9 @@ fn grok_build_plan_no_subagents_toolset() -> ToolServerConfig {
             (&grok_build::SearchReplaceTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
             kill_task_tool_config(),
             (&grok_build::TodoWriteTool).into(),
             task_output_tool_config(),
@@ -523,6 +526,9 @@ fn grok_build_ask_user_toolset() -> ToolServerConfig {
             (&grok_build::SearchReplaceTool).into(),
             (&grok_build::ListDirTool).into(),
             (&grok_build::GrepTool).into(),
+            (&grok_build::SearchSymbolsTool).into(),
+            (&grok_build::TraceCallsTool).into(),
+            (&grok_build::BlastRadiusTool).into(),
             kill_task_tool_config(),
             (&grok_build::TodoWriteTool).into(),
             task_output_tool_config(),
@@ -1710,6 +1716,16 @@ mod tests {
             let ids: Vec<&str> = config.tools.iter().map(|tool| tool.id.as_str()).collect();
             for id in expect {
                 assert!(ids.contains(&id), "missing {id}");
+            }
+        }
+        // Not named presets: pager profiles resolved through AgentDefinition.
+        for (label, config) in [
+            ("plan-no-subagents", grok_build_plan_no_subagents_toolset()),
+            ("ask-user", grok_build_ask_user_toolset()),
+        ] {
+            let ids: Vec<&str> = config.tools.iter().map(|tool| tool.id.as_str()).collect();
+            for id in expect {
+                assert!(ids.contains(&id), "{label} missing {id}");
             }
         }
         for preset in ["grok-computer", "codex"] {
