@@ -131,7 +131,11 @@ async fn call_with_project(
             forget_project(&cwd).await;
             match run_query(ctx, &cwd, tool, &args, caller).await {
                 QueryOutcome::Text(text) => cap_text(&text, max_bytes),
-                _ => QUERY_FAILED.to_string(),
+                // Keep the specific sentence. Collapsing these into `QUERY_FAILED` told the
+                // model "query failed" when the truth was "the server is gone" or "nothing
+                // indexes this workspace" — two answers that need different follow-up.
+                QueryOutcome::Sentence(sentence) => sentence.to_string(),
+                QueryOutcome::UnknownProject => QUERY_FAILED.to_string(),
             }
         }
     }
@@ -233,13 +237,22 @@ fn is_not_connected(err: &xai_tool_runtime::ToolError) -> bool {
         || err.detail.contains("not a valid MCP tool name")
 }
 
-/// `codebase-memory-mcp` 0.10.2 reports a stale or rejected name as
-/// `{"error":"project not found"}`, `project not found or not indexed`, or
-/// `invalid project name`. Checked only on `ToolError` detail and MCP error
-/// bodies, never on a successful graph result.
+/// `codebase-memory-mcp` 0.10.2 reports a stale or rejected name in these two forms. Checked only
+/// on `ToolError` detail and MCP error bodies, never on a successful graph result — a graph row
+/// may legitimately contain either phrase.
+const UNKNOWN_PROJECT_MARKERS: [&str; 2] = ["project not found", "invalid project name"];
+
+/// The exact 0.10.2 body, captured from a live call with a bogus project. If a server upgrade
+/// rephrases the error, `the_live_unknown_project_body_is_still_recognised` fails loudly instead
+/// of the marker silently falling through to `QUERY_FAILED` and losing the one automatic retry.
+#[cfg(test)]
+const OBSERVED_UNKNOWN_PROJECT_BODY: &str = "{\"error\":\"project not found or not indexed\",\"hint\":\"Use list_projects to see all indexed projects, then pass it as the \\\"project\\\" argument.\",\"available_projects\":[\"mnt-data-repos-grok-build-Jev\"],\"count\":1}";
+
 fn is_unknown_project(text: &str) -> bool {
     let lower = text.to_ascii_lowercase();
-    lower.contains("project not found") || lower.contains("invalid project name")
+    UNKNOWN_PROJECT_MARKERS
+        .iter()
+        .any(|marker| lower.contains(marker))
 }
 
 fn clamp_depth(depth: u32) -> u32 {
@@ -354,7 +367,7 @@ mod tests {
         search_symbols, trace_calls,
     };
     use crate::implementations::grok_build::code_graph::limits::{
-        NO_INDEX, NOT_CONNECTED, QUERY_FAILED,
+        NO_INDEX, NOT_CONNECTED, QUERY_FAILED, TRUNCATION_HINT,
     };
     use crate::types::output::{MCPOutput, SearchToolOutput, ToolOutput};
     use crate::types::resources::{Cwd, InnerDispatch, Resources};
@@ -775,10 +788,9 @@ mod tests {
         let fake = FakeDispatch::with_responses(vec![list_projects_json("grok", "/repo", 1), mcp]);
         let ctx = ctx_with_cwd_and_dispatch(Path::new("/repo"), fake);
         let out = search_symbols(&ctx, symbol_request()).await;
-        let suffix = "\n… truncated. Narrow the query.";
-        assert!(out.ends_with(suffix));
+        assert!(out.ends_with(TRUNCATION_HINT));
         assert!(out.starts_with("yyyy"));
-        assert_eq!(out.len(), 2_000 + suffix.len());
+        assert_eq!(out.len(), 2_000 + TRUNCATION_HINT.len());
 
         clear_project_cache_for_test().await;
         let other = FakeDispatch::with_responses(vec![
@@ -946,5 +958,14 @@ mod tests {
         assert_eq!(out, "fresh");
         assert_eq!(fake.call(0).name, "codebase-memory-mcp__list_projects");
         assert_eq!(json_str(&fake.call(1).args, "project"), Some("grok"));
+    }
+
+    #[test]
+    fn the_live_unknown_project_body_is_still_recognised() {
+        assert!(super::is_unknown_project(
+            super::OBSERVED_UNKNOWN_PROJECT_BODY
+        ));
+        assert!(super::is_unknown_project("Invalid project name: grok"));
+        assert!(!super::is_unknown_project("no index is configured"));
     }
 }
