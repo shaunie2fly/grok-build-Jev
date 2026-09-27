@@ -122,23 +122,12 @@ impl ToolKind {
 }
 
 /// Whether a tool of this kind skips the write-approval gate.
+///
+/// Delegates to [`ToolKind::is_read_only`] rather than repeating the list. The two were separate
+/// 13-kind matches, and a kind added to one but not the other would have failed silently in the
+/// dangerous direction — skipping the approval gate for something not classified read-only.
 pub fn skips_write_approval(kind: ToolKind) -> bool {
-    matches!(
-        kind,
-        ToolKind::Read
-            | ToolKind::Search
-            | ToolKind::Lsp
-            | ToolKind::CodeGraph
-            | ToolKind::ListDir
-            | ToolKind::List
-            | ToolKind::MemorySearch
-            | ToolKind::MemoryGet
-            | ToolKind::WebSearch
-            | ToolKind::WebFetch
-            | ToolKind::EnterPlan
-            | ToolKind::ExitPlan
-            | ToolKind::AskUser
-    )
+    kind.is_read_only()
 }
 
 /// First-party tool wire names whose argument streams are long enough for a writing-phase spinner label to be visible (file bodies, edit
@@ -324,13 +313,13 @@ mod tests {
     }
 
     #[test]
-    fn code_graph_is_read_only_code_intelligence() {
-        assert_eq!(ToolKind::CodeGraph.presentation_name(), "Code Graph");
+    fn code_graph_is_read_only() {
+        // Pins the new kind's classification. The presentation name and the
+        // skips_write_approval assertions were removed: the first restated the match arm, the
+        // second now restates `is_read_only`, which this function delegates to.
         assert!(ToolKind::CodeGraph.is_read_only());
-        assert!(skips_write_approval(ToolKind::CodeGraph));
-        assert!(skips_write_approval(ToolKind::Lsp));
-        assert!(!skips_write_approval(ToolKind::Edit));
     }
+
     #[test]
     fn namespace_round_trips_snake_case_with_pascal_aliases() {
         use strum::IntoEnumIterator;
