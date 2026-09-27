@@ -35,31 +35,41 @@ Three phases, in order. Each is independently checkable.
 |---|---|---|
 | A | Synced fork onto upstream `xai-org/grok-build` 1.0.41 | commit `2bc80cb8` (merge of `99e690f3` + `07e35a3d`) |
 | B | Reviewed the Jev layer against the live endpoint; found 3 defects + 1 coverage gap | findings in §3 |
-| C | Fixed, tested, verified, committed, deployed | commit `a616779e`, deployed binary `grok-1.0.41-jev (a616779eae9e)` |
+| C | Fixed, tested, verified, committed, deployed | commit `a616779e`; pushed as part of `80c13220`; deployed binary `grok-1.0.41-jev-c680d3c7` |
 
 ### Repository state
 
+**Refreshed 2026-09-27.** The judgment work did not move. Unrelated commits landed on `main` after
+it, so the hashes this document validated are now *ancestors* of HEAD, not HEAD itself. Validate the
+judgment fix **by hash**, not by position.
+
 ```
-HEAD      = a616779eae9e8fc4420b2e61c0de348347fd0c48   (branch main)
-parent    = 2bc80cb8e8165926efc3ef89127750aafee85f4c8   (upstream merge)
-origin/main = 2bc80cb8  ← HEAD is AHEAD BY 1 AND UNPUSHED
+judgment fix   = a616779e  (parent 2bc80cb8, the upstream merge)  ← the commit this doc validates
+doc commits    = 9f160f0c (this file) → 82dfe92a (§12) → 80c13220 (credential-less hook test)
+code graph     = 34d26652 … c680d3c7  (feat/code-graph-thin-client, fast-forwarded onto main)
+HEAD           = c680d3c7  (branch main)
+origin/main    = 80c13220  ← main is AHEAD BY 8 AND UNPUSHED (code graph only)
 working tree: clean
 ```
+
+`a616779e` is an ancestor of `origin/main` (pushed 2026-09-27 06:52), so the judgment fix is on the
+remote. The 8 code-graph commits on top of it are local only.
 
 **Check 1.1 — is the fix commit real and correctly parented?**
 
 ```sh
 cd /mnt/data/repos/grok-build-Jev
-git log -1 --format='%H %s'          # expect a616779e… fix(judgment): …
-git log -1 --format='%p'             # expect exactly one parent: 2bc80cb8…
-git status --porcelain               # expect EMPTY (clean tree)
-git rev-parse origin/main            # expect 2bc80cb8… i.e. NOT equal to HEAD
+git show -s --format='%H %s' a616779e            # expect a616779e… fix(judgment): …
+git show -s --format='%p'    a616779e            # expect exactly one parent: 2bc80cb8…
+git merge-base --is-ancestor a616779e HEAD        && echo "fix is in HEAD"
+git merge-base --is-ancestor a616779e origin/main && echo "fix is on the remote"
+git status --porcelain                            # expect EMPTY (clean tree)
 ```
 
 If `git status` is non-empty, the working tree has drifted from what was validated — stop and ask.
 
-> **Action item (not a defect):** commit `a616779e` exists only locally. If you want it on the fork
-> remote, `git push origin main` is required. That was deliberately left to the owner.
+> **Action item — CLOSED 2026-09-27:** the judgment commits were pushed; `origin/main` is now
+> `80c13220`, which contains `a616779e`. Only the 8 code-graph commits above it remain local.
 
 ---
 
@@ -385,9 +395,9 @@ Do not report these as validated. They are either unproven or known-open.
 
 ## 7. Deployed state (host: shaun-laptop-14)
 
-```
-binary     : ~/.grok/bin/grok-1.0.41-jev-a616779  (symlinks: grok, agent)
-             reports: grok 1.0.41-jev (a616779eae9e)
+binary     : ~/.grok/bin/grok-1.0.41-jev-c680d3c7  (symlinks: grok, agent)
+             reports: grok 1.0.41-jev (c680d3c7c912)
+previous   : ~/.grok/bin/grok-1.0.41-jev-a616779   (the judgment-only deploy this section validated)
 rollback   : ~/.grok/bin/grok-1.0.38-jev-240a36a   (via scripts/deploy-fork.sh --rollback)
 install state: ~/.grok/bin/.fork-install-state
 config     : ~/.grok/config.toml
@@ -400,13 +410,14 @@ auto_update: false (required — otherwise npm's updater replaces the fork)
 **Check 7.1 — deployed binary matches the validated commit**
 
 ```sh
-/home/shaun/.grok/bin/grok --version          # expect: grok 1.0.41-jev (a616779eae9e)
-cat /home/shaun/.grok/bin/.fork-install-state # expect commit=a616779, version=1.0.41-jev
+/home/shaun/.grok/bin/grok --version          # expect: grok 1.0.41-jev (c680d3c7c912)
+cat /home/shaun/.grok/bin/.fork-install-state # expect commit=c680d3c7, version=1.0.41-jev
 ```
 
-The trailing `a616779` must equal `git rev-parse --short HEAD` in the repo. **If the repo has moved
+The trailing `c680d3c7` must equal `git rev-parse --short HEAD` in the repo. **If the repo has moved
 on since the deploy, the deployed binary no longer corresponds to HEAD** — that is the single most
-likely way this handover goes stale.
+likely way this handover goes stale. (`grok-1.0.41-jev-a616779` is still on disk as `previous`; it
+is the binary the judgment sections were originally validated against, not the one now installed.)
 
 **Check 7.2 — the live config parses and the threshold is applied**
 
@@ -420,7 +431,7 @@ cd /tmp && GROK_HOME=$HOME/.grok grok inspect 2>&1 | grep -A3 'Config Warnings'
 **Check 7.3 — the fix is actually in the binary**
 
 ```sh
-strings -a /home/shaun/.grok/bin/grok-1.0.41-jev-a616779 > /tmp/deployed.strings
+strings -a "$(readlink -f /home/shaun/.grok/bin/grok)" > /tmp/deployed.strings
 grep -c 'no user query text in the conversation yet'   /tmp/deployed.strings   # expect >= 1
 grep -c 'consulting Jev for dynamic reasoning effort'  /tmp/deployed.strings   # expect >= 1
 grep -c 'model offers no reasoning-effort menu'        /tmp/deployed.strings   # expect >= 1
@@ -739,3 +750,25 @@ the mapping in §12.4 has drifted.
 **If you want to falsify the mapping:** call the API directly for a prompt, compute
 `int(norm * n)` yourself from the table in §12.4, and check the engine agrees. A mismatch means
 either the menu changed (re-read `models_cache.json`) or the mapping drifted.
+
+---
+
+## 13. Postscript — what landed after this handover (2026-09-27)
+
+This document validates **one commit**: `a616779e`. `main` has moved since, so read the repository
+state block in §1 before running anything here.
+
+| Body of work | Commits | On `origin/main`? |
+|---|---|---|
+| This handover (`9f160f0c`) and the §12 mechanism doc (`82dfe92a`) | `a616779e` → `9f160f0c` → `82dfe92a` → `80c13220` | yes — `origin/main` is `80c13220` |
+| Code-graph thin client (`search_symbols`, `trace_calls`, `blast_radius`) | `34d26652` … `c680d3c7` | **no** — 8 commits, local only at time of writing |
+
+**The code-graph work does not touch the judgment layer.** It adds a new `ToolKind::CodeGraph`
+(read-only) and three MCP-backed tools. To review it: `git show 80c13220..c680d3c7`, then
+`cargo test -p xai-grok-tools code_graph`. If you want the in-product behavioural proof that §6.2
+says is missing for the safety gate, the same gap still applies — nothing since `a616779e` closed it.
+
+**Still open, unchanged by anything above:** §6.1 (first-turn S1 skip), §6.2 (safety gate not proven
+in-product), §6.3 (flaky `signed_cache_compromised…` test), §6.4 (`tournament_pruning` is an inert
+lever), §6.5 (no interactive-TUI acceptance run), and §8 (**rotate the TypeSafe key** — highest
+severity item in this document). A newer commit on `main` is not evidence that any of them closed.
